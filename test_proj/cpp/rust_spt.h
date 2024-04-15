@@ -29,7 +29,7 @@ struct RustVec {
 		data = nullptr;	len = cap = 0;
 		__set_from(ano.data, ano.len);
 	}
-	RustVec(RustVec&& ano) {
+	RustVec(RustVec&& ano) noexcept {
 		len = ano.len;
 		cap = ano.cap;
 		data = ano.data;
@@ -42,7 +42,7 @@ struct RustVec {
 		__set_from(ano.data, ano.len);
 		return *this;
 	}
-	RustVec& operator = (RustVec&& ano) {
+	RustVec& operator = (RustVec&& ano) noexcept {
 		clear(true);
 		std::swap(data, ano.data);
 		std::swap(len, ano.len);
@@ -66,8 +66,9 @@ struct RustVec {
 		if (len == cap) {
 			// we always assume T is trivially movable. that means moving it from one place to another
 			// never need to call the move constructor, just memcpy is enough.
+			// this is not always true for some types like std::string of gcc libstdc++.
 			cap = std::max<uintptr_t>(cap * 2, 32u);
-			data = (T*)realloc(data, sizeof(T) * cap);
+			data = (T*)realloc((void*)data, sizeof(T) * cap);
 		}
 		new (data + len) T(t);
 		++len;
@@ -82,7 +83,7 @@ protected:
 		}
 		len = len0;
 		if constexpr (std::is_trivially_copyable<T>::value) {
-			memcpy(data, data0, sizeof(T) * len0);
+			if (data) memcpy(data, data0, sizeof(T) * len0);
 		} else {
 			for (uintptr_t i = 0; i < len0; ++i) {
 				new (data + i) T(data0[i]);
@@ -96,17 +97,7 @@ struct RustString : RustVec<char>
 	~RustString() {	if (data) free(data); data=0;cap=len=0; }
 	RustString() = default;
 	RustString(const RustString& ano) : RustVec<char>(ano) {}
-	RustString(RustString&& ano) : RustVec<char>(std::move(ano)) {}
-	RustString& operator = (const RustString& ano) {
-		__set_from(ano.data, ano.len);
-		return *this;
-	}
-	RustString& operator = (RustString&& ano) {
-		if (data) free(data);
-		cap = len = 0; data = 0;
-		RustVec<char>::operator=(std::move(ano));
-		return *this;
-	}
+	RustString(RustString&& ano) noexcept : RustVec<char>(std::move(ano)) {}
 	RustString(const char* str) {
 		cap = len = 0; data = 0;
 		__set_from(str, strlen(str));
@@ -127,6 +118,28 @@ struct RustString : RustVec<char>
 		return std::string_view(data, len);
 	}
 
+	RustString& operator=(RustString&& ano) noexcept {
+		if (data) free(data);
+		cap = len = 0; data = 0;
+		RustVec<char>::operator=(std::move(ano));
+		return *this;
+	}
+	RustString& operator=(const RustString& ano) {
+		__set_from(ano.data, ano.len);
+		return *this;
+	}
+	RustString& operator=(const std::string& ano) {
+		__set_from(ano.c_str(), ano.length());
+		return *this;
+	}
+	RustString& operator=(const std::string_view& ano) {
+		__set_from(ano.data(), ano.length());
+		return *this;
+	}
+	RustString& operator=(const char* cs) {
+		__set_from(cs, strlen(cs));
+		return *this;
+	}
 	bool operator == (const std::string_view& rhs) const { return view() == rhs; }
 	bool operator == (const std::string& rhs) const { return view() == rhs; }
 	bool operator == (const char* rhs) const { return view() == rhs; }
@@ -150,7 +163,10 @@ protected:
 			cap = len0;
 		}
 		len = len0;
-		memcpy(data, data0, 1+len0);
+		if (data) {
+			memcpy(data, data0, len);
+			data[len] = 0;
+		}
 	}
 };
 
