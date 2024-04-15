@@ -3,12 +3,15 @@ pub use directcpp_macro::bridge;
 pub use directcpp_macro::enable_msvc_debug;
 
 // implies the value is POD so no dtor is needed, it's just copied.
+#[doc(hidden)]
 pub struct POD<T>(T);
 
+#[doc(hidden)]
 pub trait ManDtor {
 	unsafe fn __dtor(ptr: *mut [u8;0]);
 }
 
+#[doc(hidden)]
 pub trait DropSP {
 	unsafe fn __drop_sp(sp_ptr: *mut [u8;0]);
 }
