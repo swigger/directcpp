@@ -12,4 +12,4 @@ repository = "https://github.com/swigger/directcpp"
 rust-version = "1.76"
 
 [dependencies]
-directcpp-macro = { path="../macro", version = "0.1.0" }
+directcpp-macro = { path="macro", version = "0.1.0" }
