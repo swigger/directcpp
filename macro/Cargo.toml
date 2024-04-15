@@ -8,7 +8,7 @@ categories = ["development-tools::ffi", "api-bindings"]
 description = "Direct call cpp from Rust (proc-macro)"
 edition = "2021"
 homepage = "https://github.com/swigger/directcpp"
-keywords = ["ffi", "c++"]
+keywords = ["ffi", "c++", "cpp"]
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/swigger/directcpp"
@@ -18,7 +18,6 @@ rust-version = "1.76"
 proc-macro2 = "1.0.79"
 quote = "1.0.35"
 syn = "2.0.58"
-libc = "0.2.153"
 regex = "1.10.4"
 lazy_static = "1.4.0"
 

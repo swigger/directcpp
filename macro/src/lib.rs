@@ -270,7 +270,7 @@ extern "C" {
 /// ```
 /// #[bridge]
 /// extern "C++" {
-/// 	pub fn cpp_ptr(xx:i32) -> SharedPtr<CppStruct>;
+/// 	pub fn on_start();
 /// }
 /// ```
 /// This generates the following code:
