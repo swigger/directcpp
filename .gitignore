@@ -1,0 +1,10 @@
+.idea/
+.vs/
+target/
+Debug/
+Release/
+
+*.user
+.DS_Store
+*.obj
+*.o
