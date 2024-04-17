@@ -2,47 +2,33 @@ use std::env;
 use std::fs;
 use cc;
 
-#[allow(dead_code)]
-fn dump_env() {
-    let env_vars = env::vars();
-
-    // Convert the environment variable pairs into a string
-    let env_vars_str = env_vars
-        .map(|(key, value)| format!("{}={}", key, value))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    // Write the environment variables to a file named "env.txt"
-    match fs::write("env.txt", env_vars_str) {
-        Ok(_) => println!("Environment variables saved to 'env.txt'"),
-        Err(err) => eprintln!("Error saving environment variables: {}", err),
-    }
-}
-
 fn main() {
+	let projname = "test_cpp";
     println!("cargo:rerun-if-changed=cpp/prove.cpp");
     let from_vs = env::var("VisualStudioDir").map(|x| !x.is_empty()).unwrap_or(false);
     let is_debug = env::var("PROFILE").map(|x| x == "debug").unwrap_or(false);
     if from_vs {
         if is_debug {
-            println!("cargo:rustc-link-arg-bins=x64/Debug/test_cpp.lib");
-            println!("cargo:rerun-if-changed=x64/Debug/test_cpp.lib");
+            println!("cargo:rustc-link-arg-bins=x64/Debug/{}.lib", projname);
+            println!("cargo:rerun-if-changed=x64/Debug/{}.lib", projname);
         } else {
-            println!("cargo:rustc-link-arg-bins=x64/Release/test_cpp.lib");
-            println!("cargo:rerun-if-changed=x64/Release/test_cpp.lib");
+            println!("cargo:rustc-link-arg-bins=x64/Release/{}.lib", projname);
+            println!("cargo:rerun-if-changed=x64/Release/{}.lib", projname);
         }
     } else {
-        let mut ccb = cc::Build::new();
+        let mut cxxb = cc::Build::new();
+		cxxb.cpp(true).std("c++20");
         if cfg!(target_os = "windows") {
             env::set_var("VSLANG", "1033");
-            ccb.flag("/std:c++20").flag("/EHsc").flag("/utf-8")
+            cxxb.flag("/EHsc").flag("/utf-8")
                 .flag("/D_CRT_SECURE_NO_WARNINGS")
                 .flag("/D_CRT_NONSTDC_NO_WARNINGS")
-                .flag("/DUNICODE")
-                .flag("/D_UNICODE");
+                .flag("/DUNICODE").flag("/D_UNICODE");
         } else {
-            ccb.flag("-std=c++20").flag("-Wno-unused-parameter").flag("-Wno-unused-result").flag("-g");
+            cxxb.flag("-Wno-unused-parameter").flag("-Wno-unused-result")
+				.flag("-Wno-multichar").flag("-Wno-missing-field-initializers")
+				.flag("-g");
         }
-        ccb.cpp(true).file("cpp/prove.cpp").compile("test_cpp1");
+        ccb.file("cpp/prove.cpp").compile(&format!("{}1", projname));
     }
 }
