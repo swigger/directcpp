@@ -28,6 +28,7 @@ extern "C++" {
 	// the heap. And then normal object as arguments can only be readonly shared between cpp/rust.
 	// ok, you can use &mut MagicIn here, at your own risk.
 	pub fn on_magic(magic: &MagicIn) -> MagicOut;
+	pub fn get_message()->String;
 
 	// for complex object can only be handled at c++ side.
 	// rust will keep a reference to the shared_ptr
@@ -57,6 +58,7 @@ fn main()
 	println!("Hello from rust!");
 	// let's call the on_start function in CPP!
 	on_start();
+	println!("{}", get_message());
 
 	/*
 	let mut x: u64 = 4;

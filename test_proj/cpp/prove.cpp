@@ -77,12 +77,18 @@ MagicOut on_magic(const MagicIn& input) {
 	return out;
 }
 
+RustString get_message() {
+	return "message from c++";
+}
+
 // the only costs in c++ side is to enable some classes and structures for interop.
 // only those type used in return values need this. Those used in arguments do not need this.
 // you can put the forced references in a separate function that is never called to avoid runtime cost.
 void unused_function(volatile void** ptr) {
 	ffi::enable_class_sp<Proof>();
 	ffi::enable_class<MagicOut>();
+	ffi::enable_class<RustString>();
+
 	// if your functions are inlined, you should force reference them to have a function body so that rust can find them.
 	// non-inline functions are not required, leave them as is.
 	// no need to call: force_ref(&Proof::Print);

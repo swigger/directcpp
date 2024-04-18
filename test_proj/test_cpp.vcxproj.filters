@@ -9,9 +9,6 @@
     <ClCompile Include=".\cpp\prove.cpp">
       <Filter>cpp</Filter>
     </ClCompile>
-    <ClCompile Include="..\macro\src\bridge.cpp">
-      <Filter>cpp</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="cpp\rust_spt.h">

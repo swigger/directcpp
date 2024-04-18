@@ -104,7 +104,6 @@
     </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\macro\src\bridge.cpp" />
     <ClCompile Include=".\cpp\prove.cpp" />
   </ItemGroup>
   <ItemGroup>

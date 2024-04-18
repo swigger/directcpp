@@ -3,6 +3,13 @@ use crate::code_match;
 use crate::util::*;
 use crate::mangle::*;
 
+pub fn map_to_cxx(tp: &str) -> &str {
+	match tp {
+		"String" => "RustString",
+		_ => tp
+	}
+}
+
 pub struct Functions {
 	pub funcs: Vec<SimpFunc>,
 	pub is_cpp: bool,

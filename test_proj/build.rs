@@ -1,5 +1,4 @@
 use std::env;
-use std::fs;
 use cc;
 
 fn main() {
@@ -29,6 +28,6 @@ fn main() {
 				.flag("-Wno-multichar").flag("-Wno-missing-field-initializers")
 				.flag("-g");
         }
-        ccb.file("cpp/prove.cpp").compile(&format!("{}1", projname));
+        cxxb.file("cpp/prove.cpp").compile(&format!("{}1", projname));
     }
 }

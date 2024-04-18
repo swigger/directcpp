@@ -2,6 +2,7 @@ mod code_match;
 mod mangle;
 mod parse;
 mod util;
+use parse::{Functions, map_to_cxx};
 use std::collections::HashMap;
 use proc_macro2::{TokenStream, Span};
 use proc_macro::{TokenStream as TS0, TokenTree};
@@ -35,6 +36,7 @@ impl FFIBuilder {
 	pub fn new() -> Self { Self::default() }
 
 	fn dtor_code(tp: &str) -> String {
+		let tp = map_to_cxx(tp);
 		let dtor_name = dtor_name(tp);
 		format!("\t#[link_name = \"{dtor_name}\"]\n\tfn ffi__free_{tp}(__o: *mut usize);\n")
 	}
@@ -219,7 +221,7 @@ impl DropSP for {tp} {{
 				let ret_type = &func.ret.tp as &str;
 				let call_free = match func.ret.tp_wrap.as_str() {
 					"POD" => "".to_string(),  // no destructor for POD
-					_ => format!("ffi__free_{ret_type}(&mut __rta as *mut usize);\n"),
+					_ => format!("ffi__free_{}(&mut __rta as *mut usize);\n", map_to_cxx(ret_type)),
 				};
 				format!("const SZ:usize = (std::mem::size_of::<{ret_type}>()+16)/8;\n\
 					\tlet mut __rta : [usize;SZ] = [0;SZ];\n\
@@ -236,7 +238,7 @@ impl DropSP for {tp} {{
 	}
 
 	pub fn build_bridge_code(self: &mut Self, input: TokenStream) -> Result<TokenStream, &str> {
-		let mut xxx = parse::Functions::new();
+		let mut xxx = Functions::new();
 		if let Err(s) = xxx.parse_ts(input) {
 			self.err_str = s.to_string();
 			return Err(&self.err_str);
