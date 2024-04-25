@@ -65,12 +65,11 @@ pub struct SimpFunc {
 struct MSVCMangler{
 	sout: String,
 	is64: bool,
-	cache: HashMap<String, usize>,
 }
 
 impl MSVCMangler {
 	fn new() -> Self {
-		Self{sout: String::new(), is64:cfg!(target_pointer_width = "64"), cache: HashMap::new()}
+		Self{sout: String::new(), is64:cfg!(target_pointer_width = "64")}
 	}
 	fn class_flag(tp: &str) -> char {
 		if let Some(&x) = CLASS_HINTS.lock().unwrap().get(tp) {
@@ -87,13 +86,15 @@ impl MSVCMangler {
 			'U'
 		}
 	}
-	fn map_tp(intp: &str) -> &'static str{
+	fn map_tp(intp: &str, is64: bool) -> &'static str{
 		match intp {
 			"i32"|"int" => "H",
 			"u32"|"uint32_t" => "I",
 			"i64"|"int64_t" => "_J",
 			"u64"|"uint64_t" => "_K",
 			"bool" => "_N",
+			"char" => "D",
+			"size_t" => select_val(is64, "_K", "K"),
 			"i8"|"int8_t" => "C",
 			"u8"|"uint8_t" => "E",
 			"i16"|"int16_t" => "F",
@@ -105,7 +106,6 @@ impl MSVCMangler {
 		}
 	}
 	fn add_type(self: &mut Self, tp: &str, _is_const: bool) -> Result<(), &'static str> {
-		_ = &self.cache;
 		let reg1 = r"\s*(const\s+)?(.*?)([&*])\s*$";
 		let reg2 = r"\s*(?:std::\s*)?(\w+)<(\w+)>\s*$";
 
@@ -146,7 +146,7 @@ impl MSVCMangler {
 			return Ok(());
 		}
 
-		let tpstr = Self::map_tp(tp);
+		let tpstr = Self::map_tp(tp, self.is64);
 		if ! tpstr.is_empty() {
 			self.sout.push_str(tpstr);
 			return Ok(());
@@ -212,8 +212,20 @@ impl MSVCMangler {
 		if func.arg_list.is_empty() {
 			self.sout.push('X');
 		} else {
+			let mut cache = HashMap::new();
+			let mut cache_idx = 0;
 			for arg in &func.arg_list {
+				let old_sz = self.sout.len();
 				self.add_type(&arg.tp_cpp, arg.is_const)?;
+				let added = (&self.sout[old_sz..]).to_string();
+				if let Some(&idx) = cache.get(&added) {
+					self.sout.truncate(old_sz);
+					let idx_str = format!("{}", idx);
+					self.sout.push_str(&idx_str);
+				} else if added.len() > 1 {
+					cache.insert(added, cache_idx);
+					cache_idx += 1;
+				}
 			}
 			self.sout.push('@');
 		}
@@ -339,10 +351,24 @@ pub fn mangle_gcc(func: &SimpFunc) -> Result<String, &'static str> {
 }
 
 pub fn mangle(func:&SimpFunc) -> Result<String, &'static str> {
+	// arguments may not 1:1
+	let mut func2 = func.clone();
+	func2.arg_list.clear();
+	for args in  &func.arg_list {
+		if let Some(_) = args.tp_cpp.find(',') {
+			for seg in args.tp_cpp.split(',') {
+				let mut arg = args.clone();
+				arg.tp_cpp = seg.to_string();
+				func2.arg_list.push(arg);
+			}
+		} else {
+			func2.arg_list.push(args.clone());
+		}
+	}
 	#[cfg(not(target_os = "windows"))]
-	{ return GccMangler::new().mangle(func); }
+	{ return GccMangler::new().mangle(&func2); }
 	#[cfg(target_os = "windows")]
-	{ return MSVCMangler::new().mangle(func); }
+	{ return MSVCMangler::new().mangle(&func2); }
 }
 
 pub fn dtor_name(tp: &str) -> String {

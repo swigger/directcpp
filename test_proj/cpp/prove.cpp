@@ -59,6 +59,16 @@ void on_start() {
 #ifdef _WIN32
 	SetConsoleCP(CP_UTF8);
 	SetConsoleOutputCP(CP_UTF8);
+
+	char cmd[200];
+	snprintf(cmd, sizeof(cmd), "waitpid %d", (int)GetCurrentProcessId());
+	PROCESS_INFORMATION pinfo{};
+	STARTUPINFOA sinfo = { sizeof(sinfo) };
+	if (CreateProcessA(NULL, cmd, 0, 0, 0, 0, 0, 0, &sinfo, &pinfo))
+	{
+		CloseHandle(pinfo.hProcess);
+		CloseHandle(pinfo.hThread);
+	}
 #endif
 	std::cout << "\x1b[1;35mhello from CPP!\x1b[0m" << std::endl;
 }
@@ -77,8 +87,10 @@ MagicOut on_magic(const MagicIn& input) {
 	return out;
 }
 
-RustString get_message() {
-	return "message from c++";
+namespace myns {
+	RustString get_message() {
+		return "message from c++";
+	}
 }
 
 // the only costs in c++ side is to enable some classes and structures for interop.

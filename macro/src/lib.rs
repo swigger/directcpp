@@ -62,7 +62,7 @@ impl FFIBuilder {
 		};
 
 		if tp_strategy != TYPE_POD {
-			if tp1 & 1 == 0 {
+			if (tp1 & 1 == 0) && rtwrap != "SharedPtr" {
 				tp1 |= 1;
 				self.extc_code += &Self::dtor_code(tp);
 			}
@@ -108,7 +108,11 @@ impl DropSP for {tp} {{
 		let mut args_c = Vec::new();
 		let mut args_r = Vec::new();
 		let mut args_usage = Vec::new();
-		let mut fn_name = func.fn_name.to_string();
+		let mut fn_name =  if let Some(pos) = func.fn_name.rfind("::") {
+			func.fn_name[pos + 2..].to_string()
+		}else{
+			func.fn_name.to_string()
+		};
 		if !func.klsname.is_empty() {
 			args_c.push("this__: *const u8".to_string());
 			args_r.push(format!("this__: CPtr<{}>", &func.klsname));
@@ -168,9 +172,32 @@ impl DropSP for {tp} {{
 		};
 
 		for arg in &func.arg_list {
+			let mut args_x_done = false;
 			let is_ref = arg.tp_full.chars().next().unwrap() == '&';
 			let usage = match arg.tp_wrap.as_str() {
-				""|"POD" if is_ref => format!("{} as *{} {}", &arg.name, select_val(arg.is_const, "const", "mut"), &arg.tp),
+				""|"POD" if is_ref => {
+					match arg.tp.as_str() {
+						"CStr" => {
+							args_x_done = true;
+							args_c.push(format!("{}: *const i8", &arg.name));
+							args_r.push(format!("{}: &CStr", &arg.name));
+							format!("{}.as_ptr()", &arg.name)
+						},
+						"str" => {
+							args_x_done = true;
+							args_c.push(format!("{}: *const u8, {}_len: usize", &arg.name, &arg.name));
+							args_r.push(format!("{}: &str", &arg.name));
+							format!("{}.as_ptr(), {}.len()", &arg.name, &arg.name)
+						},
+						"[u8]" => {
+							args_x_done = true;
+							args_c.push(format!("{}: *const u8, {}_len: usize", &arg.name, &arg.name));
+							args_r.push(format!("{}: &[u8]", &arg.name));
+							format!("{}.as_ptr(), {}.len()", &arg.name, &arg.name)
+						},
+						_ => format!("{} as *{} {}", &arg.name, select_val(arg.is_const, "const", "mut"), &arg.tp),
+					}
+				},
 				"CPtr" => format!("{}.addr as * const u8", &arg.name),
 				"Option" => match is_ref {
 					true => format!("{}.as_ref().map_or(0 as * const {}, |x| x as * const {})", &arg.name, &arg.tp, &arg.tp),
@@ -188,8 +215,10 @@ impl DropSP for {tp} {{
 				}
 			};
 			args_usage.push(usage);
-			args_c.push(format!("{}: {}", &arg.name, &arg.tp_asc));
-			args_r.push(format!("{}: {}", &arg.name, &arg.tp_full));
+			if !args_x_done {
+				args_c.push(format!("{}: {}", &arg.name, &arg.tp_asc));
+				args_r.push(format!("{}: {}", &arg.name, &arg.tp_full));
+			}
 		}
 
 		let link_name = self.get_link_name(&func, is_cpp, )?;
@@ -244,8 +273,8 @@ impl DropSP for {tp} {{
 			return Err(&self.err_str);
 		}
 
-		for func in xxx.funcs {
-			if let Err(_) = self.build_one_func(&func, xxx.is_cpp) {
+		for func in &xxx.funcs {
+			if let Err(_) = self.build_one_func(func, xxx.is_cpp) {
 				return Err(&self.err_str);
 			}
 		}
@@ -327,15 +356,149 @@ pub fn enable_msvc_debug(args: TS0, _input: TS0) -> TS0
 
 #[cfg(test)]
 mod tests {
+	use quote::quote;
 	use super::*;
+
+	fn to_string(ts: TokenStream) -> String {
+		let ins = ts.to_string();
+		let mut outs = String::with_capacity(ins.len());
+		let mut last_ch = None;
+		let mut need_sp = false;
+		let mut in_quote = 0;
+		for ch in ins.chars() {
+			if (ch == '\'') && (in_quote == 0 || in_quote == 1) {
+				in_quote = select_val(in_quote == 0, 1, 0);
+				outs.push(ch);
+				need_sp = false;
+			} else if (ch == '"') && (in_quote == 0 || in_quote == 2) {
+				if in_quote == 0 && need_sp {
+					if let Some(ch1) = last_ch {
+						outs.push(ch1);
+					}
+				}
+				in_quote = select_val(in_quote == 0, 2, 0);
+				outs.push(ch);
+				need_sp = false;
+			} else if ch == '[' && in_quote == 0 {
+				in_quote = 3;
+				outs.push(ch);
+				need_sp = false;
+			} else if ch == ']' && in_quote == 3 {
+				in_quote = 0;
+				outs.push(ch);
+				need_sp = false;
+			} else if in_quote == 1 || in_quote == 2 {
+				outs.push(ch);
+				last_ch = None;
+			} else if ch.is_ascii_whitespace() {
+				last_ch = Some(ch);
+				continue;
+			} else if ch.is_ascii_punctuation() {
+				outs.push(ch);
+				if ch == '{' || ch == '}' || (ch == ';' && in_quote==0) {
+					outs.push('\n');
+				}
+				last_ch = None;
+				need_sp = false;
+			} else {
+				if let Some(ch1) = last_ch {
+					if need_sp {
+						outs.push(ch1);
+					}
+				}
+				outs.push(ch);
+				last_ch = None;
+				need_sp = true;
+			}
+		}
+		outs
+	}
+
+	#[test]
+	fn test_cstr() {
+		let input = quote::quote! {
+			extern "C++" {
+				#[namespace(ns_foo::ns_bar)]
+				pub fn cpp_ptr(foo:&CStr, bar:&str, baz:&[u8]) -> i32;
+			}
+		};
+		let mut bb = FFIBuilder::new();
+		let expect = quote::quote! {
+extern "C"{
+	#[link_name="?cpp_ptr@ns_bar@ns_foo@@YAHPEBD0_KPEBE1@Z"]
+	fn ffi__cpp_ptr(foo:*const i8,bar:*const u8,bar_len:usize,baz:*const u8,baz_len:usize)->i32;
+}
+pub fn cpp_ptr(foo:&CStr,bar:&str,baz:&[u8])->i32{
+	unsafe{
+		ffi__cpp_ptr(foo.as_ptr(),bar.as_ptr(),bar.len(),baz.as_ptr(),baz.len())
+	}
+}
+		};
+		assert_eq!(to_string(bb.build_bridge_code(input).unwrap()), to_string(expect));
+	}
 
 	#[test]
 	fn it_works() {
 		let ts = quote::quote!(
 			extern "C++" {
+
 				pub fn cpp_ptr(xx:i32) -> SharedPtr<CppStruct>;
+			}
+		);
+		let resp = quote! {
+			extern "C" {
+				#[link_name = "?cpp_ptr@@YA?AV?$shared_ptr@VCppStruct@@@std@@H@Z"]
+				fn ffi__cpp_ptr (__rto : * mut u8 , xx : i32) ;
+				#[link_name = "??$man_dtor_sp@VCppStruct@@@ffi@@YAXPEAX@Z"]
+				fn ffi__freeSP_CppStruct (__o : * mut usize) ;
+			}
+			impl DropSP for CppStruct {
+				unsafe fn __drop_sp (ptr : * mut [u8;0]) {
+					if ptr as usize != 0 {
+						ffi__freeSP_CppStruct (ptr as * mut usize) ;
+					}
+				}
+			}
+			pub fn cpp_ptr (xx : i32) -> SharedPtr<CppStruct>{
+				let mut __rto = SharedPtr::<CppStruct>::default();
+				unsafe {
+					ffi__cpp_ptr (&mut __rto as * mut SharedPtr<CppStruct> as * mut u8, xx);
+				}
+				__rto
+			}
+		};
+
+		let mut bb = FFIBuilder::new();
+		let r1 = bb.build_bridge_code(ts);
+		assert!(r1.is_ok());
+		let r1 = to_string(r1.unwrap());
+		assert_eq!(r1, to_string(resp));
+		//println!("{}", r1);
+
+		let ts = quote::quote!(
+			extern "C++" {
 				pub fn on_magic(magic: &mut MagicIn, cs: CPtr<CppStruct>) -> MagicOut;
-				/*
+			}
+		);
+		let expect = quote::quote! {
+extern "C"{
+#[link_name="?on_magic@@YA?AUMagicOut@@AEAUMagicIn@@PEAVCppStruct@@@Z"]fn ffi__on_magic(__rto:*mut usize,magic:*mut MagicIn,cs:*const u8);
+#[link_name="??$man_dtor@UMagicOut@@@ffi@@YAXPEAX@Z"]fn ffi__free_MagicOut(__o:*mut usize);
+}
+pub fn on_magic(magic:&mut MagicIn,cs:CPtr<CppStruct>)->MagicOut{
+const SZ:usize=(std::mem::size_of::<MagicOut>()+16)/8;
+let mut__rta:[usize;SZ]=[0;SZ];
+unsafe{
+ffi__on_magic(&mut__rta as*mut usize,magic as*mut MagicIn,cs.addr as*const u8);
+let__rto=(*(&__rta as*const usize as*const MagicOut)).clone();
+ffi__free_MagicOut(&mut__rta as*mut usize);
+__rto}
+}
+		};
+		assert_eq!(to_string( bb.build_bridge_code(ts).unwrap()   ), to_string(expect));
+
+		let ts = quote::quote!(
+			extern "C++" {
 				#[member_of(CppStruct)]
 				pub fn AddString(str: &String);
 				#[member_of(CppStruct)]
@@ -343,14 +506,9 @@ mod tests {
 				pub fn fooo(xx:i32)->SharedPtr<CppStruct>;
 				pub fn start_ctp(ac: &AccountInfo) -> i32;
 				pub fn set_log_verbose(v: i32);
-				pub fn new_user_order_c(order: &UserOrder, xxx: i32) -> UserOrderResp; */
+				pub fn new_user_order_c(order: &UserOrder, xxx: i32) -> UserOrderResp;
 			}
 		);
-		let mut bb = FFIBuilder::new();
-		let r1 = bb.build_bridge_code(ts);
-		match r1 {
-			Ok(ts) => println!("{}", ts),
-			Err(e) => println!("{}", e),
-		}
+		println!("{}", to_string(bb.build_bridge_code(ts).unwrap()));
 	}
 }

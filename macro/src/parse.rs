@@ -25,7 +25,7 @@ impl Functions {
 		err_str: "".to_string(),
 	} }
 
-	fn find_klsname(self: &mut Self, ts: TokenStream) -> String {
+	fn parse_attr(self: &mut Self, ts: TokenStream, ns:&mut String) -> String {
 		let mut dest = self.cmo.build_string(ts, true);
 		{
 			// Let's search all class hints.
@@ -41,6 +41,15 @@ impl Functions {
 				});
 			}
 		}
+		{
+			let reg = self.cmo.build_regex("namespace ( `(.*?`) )", true).unwrap();
+			let mut vr = Vec::new();
+			let mut dest1 = dest.clone();
+			if code_match::test_match(&mut dest1, &reg, &mut vr) {
+				*ns = self.cmo.back_str(&vr[0]);
+			}
+		}
+
 		let reg = self.cmo.build_regex(" member_of ( `(`iden`) )", true).unwrap();
 		let mut vr = Vec::new();
 		if code_match::test_match(&mut dest, &reg, &mut vr) {
@@ -113,10 +122,14 @@ impl Functions {
 				false => format!("{}*", cpp_type),
 			}
 			""|"POD" if is_ref => {
-				let _ = set_class_hint(&arg.tp, ClassHint::WeakStruct);
-				match arg.is_const {
-					true => format!("const {}&", cpp_type),
-					false => format!("{}&", cpp_type),
+				match arg.tp.as_str() {
+					"CStr" => "const char*".to_string(),
+					"str" => "const char*,size_t".to_string(),
+					"[u8]" => "const uint8_t*,size_t".to_string(),
+					_ => {
+						let _ = set_class_hint(&arg.tp, ClassHint::WeakStruct);
+						format!("{}{}&", select_val(arg.is_const, "const ", ""), cpp_type)
+					}
 				}
 			}
 			"" if arg.is_primitive => cpp_type.to_string(),
@@ -134,13 +147,14 @@ impl Functions {
 
 	fn parse_one_func(self: &mut Self, curfunc: &mut SimpFunc, ts: TokenStream) -> Result<(), ()>
 	{
-		let mut dest = self.cmo.build_string(ts, false);
+		let mut dest = self.cmo.build_string(ts, true);
 		let reg0 = [ "`(`iden`) : `( & `)? `( mut `)?  `(`iden`) `(?: , `|$)",
 			"`(`iden`) : &`? CPtr< &`? `(`iden`) >  `(?: , `|$)",
 			"`(`iden`) : Option< & `(`iden`) >  `(?: , `|$)",
 			"`(`iden`) : & `(`iden`) < `(`iden`) >  `(?: , `|$)",
+			"`(`iden`) : & `( [u8] `)  `(?: , `|$)",
 		];
-		let reg = reg0.map(|x| self.cmo.build_regex(x, false).unwrap());
+		let reg = reg0.map(|x| self.cmo.build_regex(x, true).unwrap());
 		let mut vr = Vec::new();
 		let mut arg_idx = 1;
 		loop {
@@ -174,6 +188,13 @@ impl Functions {
 				cur_arg.tp = self.cmo.back_str(&vr[1]);
 				cur_arg.tp_wrap = "CPtr".to_string();
 				cur_arg.tp_full = format!("CPtr<{}>", &cur_arg.tp);
+			} else if idx == 4 {
+				cur_arg.tp = self.cmo.back_str(&vr[1]);
+				cur_arg.is_const = true;
+				cur_arg.tp_full = "&[u8]".to_string();
+			} else {
+				self.err_str = format!("argument {} not supported", arg_idx);
+				return Err(());
 			}
 			self.build_as_c_arg(&mut cur_arg)?;
 			curfunc.arg_list.push(cur_arg);
@@ -207,11 +228,19 @@ impl Functions {
 		vr.clear();
 		while code_match::test_match(&mut dest, &reg1, &mut vr) {
 			let mut curfunc = SimpFunc::default();
-			if let Some(ts) = self.cmo.find_ts(&vr[0]) {
-				curfunc.klsname = self.find_klsname(ts);
-			}
 			curfunc.access = self.cmo.back_str(&vr[1]);
 			curfunc.fn_name = self.cmo.back_str(&vr[2]);
+			if let Some(ts) = self.cmo.find_ts(&vr[0]) {
+				let mut ns = String::new();
+				curfunc.klsname = self.parse_attr(ts, &mut ns);
+				if ns.len() > 0 {
+					if curfunc.klsname.len() == 0 {
+						curfunc.fn_name = format!("{}::{}", ns, curfunc.fn_name);
+					} else {
+						curfunc.klsname = format!("{}::{}", ns, curfunc.klsname);
+					}
+				}
+			}
 			let ts2 = self.cmo.find_ts(&vr[3]).unwrap();
 			let ret_vec = vr[4].chars().collect::<Vec<char>>();
 			curfunc.ret.raw_str = self.cmo.back_str2(ret_vec.iter());

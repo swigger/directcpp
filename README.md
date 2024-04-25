@@ -53,11 +53,20 @@ extern "C++" {
 
 To do this , the `MagicIn` and `MagicOut` struct should have exactly the same memory layout between c++ and rust. I provided the `rust_spt.h` in `github` which you can freely include that. This is the price for no code generation on c++ side, and gives the freedom to write and compile c++ code arbitrarily.
 
-You can also get a class object pointer from c++ side and call its member functions while keeping the safety by `SharedPtr`/`std::shared_ptr` in rust/c++, respectively. Check code in `test_proj`.
+You can also get a class object pointer from c++ side and call its member functions while keeping the safety by `SharedPtr`/`std::shared_ptr` in rust/c++, respectively. Check code in `[test_proj](https://github.com/swigger/directcpp/tree/master/test_proj)`.
 
 You may need to generate some code in your way, thought, as I used a python script to generate some c++ structure from rust, keeping the same memory layout of the them, like `MagicIn` and `MagicOut`. The python code is not a part of `directcpp`, but they with other stuff all work together to make  the final product. So `directcpp` is a loosely organized library which offers the most freedom, but it may take you a little time to get used to it.
 
 If you really like my python version code converter to generate c++ version struct from rust version struct, I can put it on `github` later. However, convert such structures is not hard, you can even do that by some text manipulation tools like`sed`.
+
+## Special Mappings
+
+Normally `directcpp` maps a name in argument as the same named type with C++. However, there are some special types:
+
+* `&CStr` maps to: `const char*` in C++
+* `&str` maps to `const char*, size_t` in C++.
+* `&[u8]` maps to `const uint8_t*, size_t` in C++.
+* `String` maps to `RustString`
 
 ## Tested On
 
