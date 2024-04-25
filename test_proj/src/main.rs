@@ -1,4 +1,5 @@
 use directcpp::{SharedPtr, DropSP, CPtr, AsCPtr};
+use std::ffi::{CStr, CString};
 
 #[repr(C)]
 struct MagicIn{
@@ -33,7 +34,7 @@ extern "C++" {
 
 	// for complex object can only be handled at c++ side.
 	// rust will keep a reference to the shared_ptr
-	pub fn cpp_ptr(xx:i32) -> SharedPtr<Proof>;
+	pub fn cpp_ptr(a0: i32, xx:&str, xx2:&CStr, xx3:&[u8]) -> SharedPtr<Proof>;
 
 	// for complex objects that can only be handled at rust side,
 	// we can always pass its address to cpp side via void* aka *const u8.
@@ -77,7 +78,7 @@ fn main()
 	*/
 
 	// lets got the struct from cpp and call some member.
-	let xx = cpp_ptr(42);
+	let xx = cpp_ptr(42, "Hello from Rust!", &CString::new("Hello from Rust!").unwrap(), &[1,2,3,4,5]);
 	println!("\x1b[1;34mRust: got shared_ptr, will call member!\x1b[0m");
 	Proof__foo(xx.as_cptr());
 	Proof__AddString(xx.as_cptr(), &"Hello from Rust!".to_string());

@@ -73,7 +73,8 @@ void on_start() {
 	std::cout << "\x1b[1;35mhello from CPP!\x1b[0m" << std::endl;
 }
 
-std::shared_ptr<Proof> cpp_ptr(int v) {
+std::shared_ptr<Proof> cpp_ptr(int v1, const char* v2, size_t v2len, const char* v3, const uint8_t * v4, size_t v4len)
+{
 	return std::make_shared<Proof>();
 }
 

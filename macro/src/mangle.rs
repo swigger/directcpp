@@ -238,47 +238,109 @@ impl MSVCMangler {
 struct GccMangler {
 	sout: String,
 	is64: bool,
+	subs: HashMap<String, usize>,
+	subs_cnt: usize,
 }
 
 impl GccMangler{
 	fn new()->Self{
-		Self{sout:String::new(), is64: cfg!(target_pointer_width = "64")}
+		Self {
+			sout:String::new(),
+			is64: cfg!(target_pointer_width = "64"),
+			subs: HashMap::new(),
+			subs_cnt: 0,
+		}
 	}
-	fn add_source_name(self: &mut Self, name: &str) {
-		self.sout.push_str(&format!("{}{}", name.len(), name));
-	}
-	fn add_type(self: &mut Self, tp: &str) {
-		let reg = r"(const\s+)?(\w+)\s*([&*])";
-		if let Some(caps) = regex::Regex::new(reg).unwrap().captures(tp) {
-			if &caps[3] == "&" {
-				self.sout.push('R');
-			} else if &caps[3] == "*" {
-				self.sout.push('P');
-			}
-			if caps.get(1).is_none() || caps[1].is_empty() {
-				// self.sout.push('C');
-			} else {
-				self.sout.push('K');
-			}
-			self.add_type(&caps[2]);
-			return;
-		} else {
-			match tp {
-				"i32"|"int" => self.sout.push('i'),
-				"u32"|"uint32_t" => self.sout.push('j'),
-				"i64"|"int64_t" => self.sout.push(select_val(self.is64,'l', 'x')),
-				"u64"|"uint64_t" => self.sout.push(select_val(self.is64,'m', 'y')),
-				"bool" => self.sout.push('b'),
-				"i8"|"int8_t" => self.sout.push('a'),
-				"u8"|"uint8_t" => self.sout.push('h'),
-				"i16"|"int16_t" => self.sout.push('s'),
-				"u16"|"uint16_t" => self.sout.push('t'),
-				"f32"|"float" => self.sout.push('f'),
-				"f64"|"double" => self.sout.push('d'),
-				""|"()"|"void" => self.sout.push('v'),
-				_ => self.add_source_name(tp),
+	fn format_radix(mut x: u128, radix: u32) -> String {
+		let mut result = vec![];
+
+		loop {
+			let m = x % radix as u128;
+			x = x / radix as u128;
+
+			// will panic if you use a bad radix (< 2 or > 36).
+			result.push(std::char::from_digit(m as u32, radix).unwrap());
+			if x == 0 {
+				break;
 			}
 		}
+		result.into_iter().rev().collect()
+	}
+
+	fn add_source_name(outs:&mut String, name: &str) {
+		outs.push_str(&format!("{}{}", name.len(), name));
+	}
+	fn add_type0(&self, vouts: &mut Vec<String>, tp: &str, cvflag: i32) {
+		let reg = r"(const\s+)?(\w+)\s*([&*])";
+		let mut outs = String::new();
+		if (cvflag & 1) != 0 {
+			outs.push('K');
+		}
+		if (cvflag & 2) != 0 {
+			outs.push('V');
+		}
+		if let Some(caps) = regex::Regex::new(reg).unwrap().captures(tp) {
+			if &caps[3] == "&" {
+				outs.push('R');
+			} else if &caps[3] == "*" {
+				outs.push('P');
+			}
+
+			vouts.push(outs);
+			if caps.get(1).is_none() || caps[1].is_empty() {
+				self.add_type0(vouts, &caps[2], 0);
+			} else {
+				self.add_type0(vouts, &caps[2], 1);
+			}
+		} else {
+			match tp {
+				"i32"|"int" => outs.push('i'),
+				"u32"|"uint32_t" => outs.push('j'),
+				"i64"|"int64_t" => outs.push(select_val(self.is64,'l', 'x')),
+				"u64"|"uint64_t" => outs.push(select_val(self.is64,'m', 'y')),
+				"bool" => outs.push('b'),
+				"char" => outs.push('c'),
+				"size_t" => outs.push(select_val(self.is64,'m', 'j')),
+				"i8"|"int8_t" => outs.push('a'),
+				"u8"|"uint8_t" => outs.push('h'),
+				"i16"|"int16_t" => outs.push('s'),
+				"u16"|"uint16_t" => outs.push('t'),
+				"f32"|"float" => outs.push('f'),
+				"f64"|"double" => outs.push('d'),
+				""|"()"|"void" => outs.push('v'),
+				_ => {
+					Self::add_source_name(&mut outs, tp);
+				},
+			}
+			vouts.push(outs);
+		}
+	}
+	fn add_type(self: &mut Self, tp: &str) {
+		let mut vouts = Vec::new();
+		self.add_type0(&mut vouts, tp, 0);
+		let mut orig_type = String::new();
+		let mut repl_type = String::new();
+		for i in 0..vouts.len() {
+			let from = vouts.len()-1-i;
+			let itm = vouts[from].as_str();
+			orig_type = format!("{}{}", itm, orig_type.as_str());
+			repl_type = format!("{}{}", itm, repl_type.as_str());
+			if i == 0 && itm.len() == 1 {
+				// primitive type
+				continue;
+			}
+			if let Some(&idx) = self.subs.get(orig_type.as_str()) {
+				if idx == 0 {
+					repl_type = "S_".to_string();
+				} else {
+					repl_type = format!("S{}_", Self::format_radix((idx-1) as u128, 36));
+				}
+			} else {
+				self.subs.insert(orig_type.clone(), self.subs_cnt);
+				self.subs_cnt += 1;
+			}
+		}
+		self.sout.push_str(repl_type.as_str());
 	}
 
 	fn add_source_name_n(self: &mut Self, name1: &str, name2: &str, tt: Option<&Vec<String>>) -> Result<bool,&'static str> {
@@ -288,10 +350,10 @@ impl GccMangler{
 		v.extend(name2.split("::").filter(|x| !x.is_empty()));
 		let need_e = match v.len() {
 			0 => { return Err("empty name")},
-			1 => { self.add_source_name(v[0]); false },
+			1 => { Self::add_source_name(&mut self.sout, v[0]); false },
 			2 if v[0] == "std" => {
 				self.sout.push_str("St");
-				self.add_source_name(v[1]);
+				Self::add_source_name(&mut self.sout, v[1]);
 				false
 			},
 			_ => {
@@ -301,7 +363,7 @@ impl GccMangler{
 					if x == "std" && idx == 0 {
 						self.sout.push_str("St");
 					} else {
-						self.add_source_name(x);
+						Self::add_source_name(&mut self.sout, x);
 					}
 					idx += 1;
 				}
@@ -313,7 +375,7 @@ impl GccMangler{
 			if tt.len() > 0 {
 				self.sout.push('I');
 				for x in tt {
-					self.add_source_name(x);
+					Self::add_source_name(&mut self.sout, x);
 				}
 				self.sout.push('E');
 				has_temp = true;
@@ -326,6 +388,8 @@ impl GccMangler{
 	}
 
 	pub fn mangle(self: &mut Self, func: &SimpFunc) -> Result<String, &'static str> {
+		self.subs.clear();
+		self.subs_cnt = 0;
 		self.sout.push_str("_Z");
 		let show_ret = self.add_source_name_n(&func.klsname, &func.fn_name, Some(&func.template_types))?;
 		if show_ret {
@@ -407,6 +471,31 @@ fn kill_warnings() {
 mod tests {
 	use super::*;
 
+	fn add_arg(f: &mut SimpFunc, tp: &str, name: &str) {
+		let mut arg = SimpArg::default();
+		arg.tp_cpp = tp.to_string();
+		arg.name = name.to_string();
+		arg.is_primitive = match tp {
+			"int8_t"|"uint8_t" => true,
+			"int16_t"|"uint16_t" => true,
+			"int"|"int32_t"|"uint32_t" => true,
+			"int64_t"|"uint64_t" => true,
+			"bool" => true,
+			"char" => true,
+			"size_t" => true,
+			"float" => true,
+			"double" => true,
+			"void" => true,
+			_ => false,
+		};
+		f.arg_list.push(arg);
+	}
+	fn set_ret(f: &mut SimpFunc, tp:&str) {
+		let mut f2 = SimpFunc::default();
+		add_arg(&mut f2, tp, "ret");
+		f.ret = f2.arg_list[0].clone();
+	}
+
 	#[test]
 	fn test_mangle() {
 		let mut func = SimpFunc::default();
@@ -425,6 +514,18 @@ mod tests {
 			func.arg_list.push(arg);
 			assert_eq!(mangle_msvc(&func), Ok("??$man_dtor@UFoo@@@ffi@@YAXPEAX@Z".to_string()));
 			assert_eq!(mangle_gcc(&func), Ok("_ZN3ffi8man_dtorI3FooEEvPv".to_string()));
+		}
+		{
+			let mut func = SimpFunc::default();
+			func.fn_name = "cpp_ptr".to_string();
+			set_ret(&mut func, "void");
+			add_arg(&mut func, "int", "a");
+			add_arg(&mut func, "const char*", "b");
+			add_arg(&mut func, "size_t", "c");
+			add_arg(&mut func, "const char*", "d");
+			add_arg(&mut func, "const uint8_t*", "e");
+			add_arg(&mut func, "size_t", "f");
+			assert_eq!(mangle_gcc(&func), Ok("_Z7cpp_ptriPKcmS0_PKhm".to_string()));
 		}
 	}
 }
