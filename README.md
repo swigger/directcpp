@@ -53,7 +53,7 @@ extern "C++" {
 
 To do this , the `MagicIn` and `MagicOut` struct should have exactly the same memory layout between c++ and rust. I provided the `rust_spt.h` in `github` which you can freely include that. This is the price for no code generation on c++ side, and gives the freedom to write and compile c++ code arbitrarily.
 
-You can also get a class object pointer from c++ side and call its member functions while keeping the safety by `SharedPtr`/`std::shared_ptr` in rust/c++, respectively. Check code in `[test_proj](https://github.com/swigger/directcpp/tree/master/test_proj)`.
+You can also get a class object pointer from c++ side and call its member functions while keeping the safety by `SharedPtr`/`std::shared_ptr` in rust/c++, respectively. Check code in [test\_proj](https://github.com/swigger/directcpp/tree/master/test_proj).
 
 You may need to generate some code in your way, thought, as I used a python script to generate some c++ structure from rust, keeping the same memory layout of the them, like `MagicIn` and `MagicOut`. The python code is not a part of `directcpp`, but they with other stuff all work together to make  the final product. So `directcpp` is a loosely organized library which offers the most freedom, but it may take you a little time to get used to it.
 
