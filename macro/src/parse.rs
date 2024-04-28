@@ -100,7 +100,6 @@ impl Functions {
 			"f64" => "double",
 			"bool" => "bool",
 			"String" => {
-				let _ = set_class_hint("RustString", ClassHint::StrongStruct);
 				arg.is_primitive=false;
 				"RustString"   //special map for String
 			},
@@ -120,6 +119,14 @@ impl Functions {
 			"Option" => match arg.is_const {
 				true=> format!("const {}*", cpp_type),
 				false => format!("{}*", cpp_type),
+			}
+			"Vec" => {
+				arg.is_primitive = false;
+				if is_ref {
+					format!("{}RustVec<{}>&", select_val(arg.is_const, "const ", ""), cpp_type)
+				} else {
+					format!("RustVec<{}>", cpp_type)
+				}
 			}
 			""|"POD" if is_ref => {
 				match arg.tp.as_str() {

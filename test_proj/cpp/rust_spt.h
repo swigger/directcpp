@@ -29,6 +29,10 @@ struct RustVec {
 		data = nullptr;	len = cap = 0;
 		__set_from(ano.data, ano.len);
 	}
+	RustVec(const T* ptr, size_t cnt) {
+		data = nullptr;	len = cap = 0;
+		__set_from(ptr, cnt);
+	}
 	RustVec(RustVec&& ano) noexcept {
 		len = ano.len;
 		cap = ano.cap;

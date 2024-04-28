@@ -36,6 +36,8 @@ extern "C++" {
 	// rust will keep a reference to the shared_ptr
 	pub fn cpp_ptr(a0: i32, xx:&str, xx2:&CStr, xx3:&[u8]) -> SharedPtr<Proof>;
 
+	pub fn get_bin() -> Vec<u8>;
+
 	// for complex objects that can only be handled at rust side,
 	// we can always pass its address to cpp side via void* aka *const u8.
 	// so there is nothing special to do here.
@@ -85,6 +87,10 @@ fn main()
 	Proof__Print(xx.as_cptr());
 	println!("\x1b[1;34mdropping the shared_ptr in rust!\x1b[0m");
 	drop(xx);
+
+	let bin = get_bin();
+	let bin = bin.iter().map(|x| format!("{:02x}", x)).collect::<Vec<String>>().join("");
+	println!("Rust: got bin: {}", bin);
 
 	let mut msgin = MagicIn{
 		ivalue: 42,

@@ -62,7 +62,7 @@ pub struct SimpFunc {
 
 
 #[derive(Default)]
-struct MSVCMangler{
+pub struct MSVCMangler{
 	sout: String,
 	is64: bool,
 }
@@ -79,11 +79,18 @@ impl MSVCMangler {
 				_ => {}
 			}
 		}
-		// panic!("class hint not set: {}", tp);
-		if tp.starts_with("C") || tp.ends_with("Class") {
-			'V'
-		} else {
-			'U'
+		// check well-known types
+		match tp {
+			"shared_ptr"|"unique_ptr" => 'V',
+			"RustVec"|"RustString" => 'U',
+			_ => {
+				// panic!("class hint not set: {}", tp);
+				if tp.starts_with("C") || tp.ends_with("Class") {
+					'V'
+				} else {
+					'U'
+				}
+			}
 		}
 	}
 	fn map_tp(intp: &str, is64: bool) -> &'static str{
@@ -127,7 +134,7 @@ impl MSVCMangler {
 		}
 
 		if let Some(caps) = regex::Regex::new(reg2).unwrap().captures(tp) {
-			self.sout.push('V');  // class, U for struct
+			self.sout.push(Self::class_flag(&caps[1]));  // class, U for struct
 			self.sout.push_str("?$");
 			self.sout.push_str(&caps[1]);
 			self.sout.push_str("@");
@@ -135,9 +142,8 @@ impl MSVCMangler {
 				"shared_ptr"|"unique_ptr" => "std",
 				_ => ""
 			};
-			self.sout.push(Self::class_flag(&caps[2]));
-			self.sout.push_str(&caps[2]);
-			self.sout.push_str("@@@");
+			self.add_type(&caps[2], false)?;
+			self.sout.push_str("@");
 			if extra_ns.len() > 0 {
 				self.sout.push_str(extra_ns);
 				self.sout.push('@');
@@ -235,7 +241,7 @@ impl MSVCMangler {
 }
 
 #[derive(Default)]
-struct GccMangler {
+pub struct GccMangler {
 	sout: String,
 	is64: bool,
 	subs: HashMap<String, usize>,
@@ -243,7 +249,7 @@ struct GccMangler {
 }
 
 impl GccMangler{
-	fn new()->Self{
+	pub fn new()->Self{
 		Self {
 			sout:String::new(),
 			is64: cfg!(target_pointer_width = "64"),
@@ -375,7 +381,13 @@ impl GccMangler{
 			if tt.len() > 0 {
 				self.sout.push('I');
 				for x in tt {
-					Self::add_source_name(&mut self.sout, x);
+					let re = regex::Regex::new(r"(.*?)<(.*)>").unwrap();
+					if let Some(caps) = re.captures(x) {
+						let tps = caps[2].split(',').map(|x| x.to_string()).collect::<Vec<_>>();
+						self.add_source_name_n("",&caps[1], Some(&tps))?;
+					} else {
+						self.add_type(x);
+					}
 				}
 				self.sout.push('E');
 				has_temp = true;

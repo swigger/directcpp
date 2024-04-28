@@ -88,6 +88,11 @@ MagicOut on_magic(const MagicIn& input) {
 	return out;
 }
 
+RustVec<uint8_t> get_bin() {
+	uint8_t data[] = {0xba, 0xad, 0xf0, 0x0d};
+	return RustVec<uint8_t>(data, sizeof(data));
+}
+
 namespace myns {
 	RustString get_message() {
 		return "message from c++";
@@ -101,6 +106,7 @@ void unused_function(volatile void** ptr) {
 	ffi::enable_class_sp<Proof>();
 	ffi::enable_class<MagicOut>();
 	ffi::enable_class<RustString>();
+	ffi::enable_class<RustVec<uint8_t>>();
 
 	// if your functions are inlined, you should force reference them to have a function body so that rust can find them.
 	// non-inline functions are not required, leave them as is.

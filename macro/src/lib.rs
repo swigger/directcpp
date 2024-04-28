@@ -38,17 +38,23 @@ impl FFIBuilder {
 	fn dtor_code(tp: &str) -> String {
 		let tp = map_to_cxx(tp);
 		let dtor_name = dtor_name(tp);
-		format!("\t#[link_name = \"{dtor_name}\"]\n\tfn ffi__free_{tp}(__o: *mut usize);\n")
+		let tp1 = tp.replace("<", "_").replace(">", "_");
+		format!("\t#[link_name = \"{dtor_name}\"]\n\tfn ffi__free_{tp1}(__o: *mut usize);\n")
 	}
 	fn sp_dtor_code(tp: &str) -> String {
 		let dtor_name = sp_dtor_name(tp);
 		format!("\t#[link_name = \"{dtor_name}\"]\n\tfn ffi__freeSP_{tp}(__o: *mut usize);\n")
 	}
 
-	fn show_dtor(self: &mut Self, tp: &str, rtwrap:&str)->Result<(), &str> {
-		let tp_strategy : i32 = match rtwrap {
+	fn show_dtor(self: &mut Self, tp: &str, rtwrap:&str, tp_cpp: &str)->Result<(), &str> {
+		let tp_strategy = match rtwrap {
 			"POD" => TYPE_POD,
-			_ => TYPE_DTOR_TRIVIAL_MOVE, // shared_ptr, unique_ptr里的对象也许不可移动，也许可以，以后再说，暂时不影响
+			// type can be dtor, and can be trivial move. trivial move is required for Rust.
+			"SharedPtr"|"UniquePtr"|"Vec"|"" => TYPE_DTOR_TRIVIAL_MOVE,
+			_ => {
+				self.err_str = format!("type {} not supported", rtwrap);
+				return Err(&self.err_str);
+			}
 		};
 		let mut mp = TYPE_STRATEGY.lock().unwrap();
 		let mut tp1 = if let Some(x) = mp.get(tp) {
@@ -64,7 +70,7 @@ impl FFIBuilder {
 		if tp_strategy != TYPE_POD {
 			if (tp1 & 1 == 0) && rtwrap != "SharedPtr" {
 				tp1 |= 1;
-				self.extc_code += &Self::dtor_code(tp);
+				self.extc_code += &Self::dtor_code(tp_cpp);
 			}
 			if rtwrap == "UniquePtr" && tp1 & 2 == 0 {
 				tp1 |= 2;
@@ -153,7 +159,7 @@ impl DropSP for {tp} {{
 			},
 			"" if func.ret.tp.is_empty() => String::new(),
 			"" if func.ret.is_primitive => format!(" -> {}", func.ret.tp),
-			""|"POD" => {
+			""|"POD"|"Vec" => {
 				ret_kind = RetKind::RtObject;
 				if is_a64 {
 					self.asm_used = true;
@@ -229,7 +235,7 @@ impl DropSP for {tp} {{
 		match ret_kind {
 			RetKind::RtPrimitive => {},
 			_ => {
-				if let Err(s) = self.show_dtor(&func.ret.tp, &func.ret.tp_wrap) {
+				if let Err(s) = self.show_dtor(&func.ret.tp, &func.ret.tp_wrap, &func.ret.tp_cpp) {
 					self.err_str = s.to_string();
 					return Err(&self.err_str);
 				}
@@ -247,17 +253,18 @@ impl DropSP for {tp} {{
 					\t__rto")
 			},
 			RetKind::RtObject => {
-				let ret_type = &func.ret.tp as &str;
+				let ret_type = &func.ret.tp_full as &str;
+				let tp1 = func.ret.tp_cpp.replace("<", "_").replace(">", "_");
 				let call_free = match func.ret.tp_wrap.as_str() {
 					"POD" => "".to_string(),  // no destructor for POD
-					_ => format!("ffi__free_{}(&mut __rta as *mut usize);\n", map_to_cxx(ret_type)),
+					_ => format!("ffi__free_{}(&mut __rta as *mut usize);\n\t\t", &tp1),
 				};
 				format!("const SZ:usize = (std::mem::size_of::<{ret_type}>()+16)/8;\n\
 					\tlet mut __rta : [usize;SZ] = [0;SZ];\n\
 					\tunsafe {{ {ret_indirect}\n\
 					\t\tffi__{fn_name}({usage}); \n\
 					\t\tlet __rto = (*(&__rta as *const usize as *const {ret_type})).clone();\n\
-					\t\t{call_free}\t\t__rto\n\
+					\t\t{call_free}__rto\n\
 					\t}}")
 			},
 			// _ => return Err("xx")
@@ -354,6 +361,8 @@ pub fn enable_msvc_debug(args: TS0, _input: TS0) -> TS0
 	TS0::new()
 }
 
+
+
 #[cfg(test)]
 mod tests {
 	use quote::quote;
@@ -412,6 +421,28 @@ mod tests {
 			}
 		}
 		outs
+	}
+
+	#[test]
+	fn test_retvec() {
+		let input = quote::quote! {
+			extern "C++" {
+				pub fn init_asset_config(url: &CStr, olddata: &[u8]) -> Vec<u8>;
+			}
+		};
+		let mut bb = FFIBuilder::new();
+		let os = to_string(bb.build_bridge_code(input).unwrap());
+		println!("{}", os);
+
+		let mut func = SimpFunc::default();
+		func.fn_name = "ffi::man_dtor".to_string();
+		func.template_types.push("RustVec<uint8_t>".to_string());
+		func.ret.is_primitive = true;
+		let mut arg = SimpArg::default();
+		arg.tp_cpp = "void*".to_string();
+		func.arg_list.push(arg);
+		let s = crate::mangle::GccMangler::new().mangle(&func).unwrap();
+		assert_eq!(s.as_str(), "_ZN3ffi8man_dtorI7RustVecIhEEEvPv");
 	}
 
 	#[test]

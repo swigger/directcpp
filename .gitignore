@@ -8,3 +8,4 @@ Release/
 .DS_Store
 *.obj
 *.o
+tmp.*
