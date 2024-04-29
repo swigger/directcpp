@@ -300,7 +300,7 @@ impl DropSP for {tp} {{
 		let extc_code = move_obj(&mut self.extc_code);
 		let norm_code = move_obj(&mut self.norm_code);
 		let use_asm = select_val(self.asm_used, "use std::arch::asm;\n", "");
-		let all_code = format!("{use_asm}extern \"C\" {{\n{extc_code}\n}}\n{norm_code}\n");
+		let all_code = format!("{use_asm}extern \"C\" {{\n{extc_code}}}\n{norm_code}\n");
 		if env_as_bool("RUST_BRIDGE_DEBUG") {
 			println!("{}", all_code);
 		}
