@@ -149,8 +149,7 @@ impl DropSP for {tp} {{
 				ret_kind = RetKind::RtSharedPtr;
 				if is_a64 {
 					self.asm_used = true;
-					ret_indirect = format!("let __rtox8 = &mut __rto as *mut {} as *mut u8;\n\
-							  asm!(\"mov x8, {{x}}\", x = in(reg) __rtox8);", &func.ret.tp_full);
+					ret_indirect = format!("let __rtox8 = &mut __rto as *mut {} as *mut u8;\n\t\t", &func.ret.tp_full);
 				} else {
 					args_c.push("__rto: * mut u8".to_string());
 					args_usage.push(format!("&mut __rto as *mut {} as *mut u8", &func.ret.tp_full));
@@ -163,8 +162,7 @@ impl DropSP for {tp} {{
 				ret_kind = RetKind::RtObject;
 				if is_a64 {
 					self.asm_used = true;
-					ret_indirect = format!("let __rtax8 = &mut __rta as *mut usize;\n\
-							  asm!(\"mov x8, {{xval1}}\", xval1 = in(reg) __rtax8);");
+					ret_indirect = "let __rtox8 = &mut __rta as *mut usize;\n\t\t".to_string();
 				} else {
 					args_c.push("__rto: * mut usize".to_string());
 					args_usage.push("&mut __rta as *mut usize".to_string());
@@ -180,38 +178,40 @@ impl DropSP for {tp} {{
 		for arg in &func.arg_list {
 			let mut args_x_done = false;
 			let is_ref = arg.tp_full.chars().next().unwrap() == '&';
-			let usage = match arg.tp_wrap.as_str() {
+			match arg.tp_wrap.as_str() {
 				""|"POD" if is_ref => {
 					match arg.tp.as_str() {
 						"CStr" => {
 							args_x_done = true;
 							args_c.push(format!("{}: *const i8", &arg.name));
 							args_r.push(format!("{}: &CStr", &arg.name));
-							format!("{}.as_ptr()", &arg.name)
+							args_usage.push(format!("{}.as_ptr()", &arg.name))
 						},
 						"str" => {
 							args_x_done = true;
 							args_c.push(format!("{}: *const u8, {}_len: usize", &arg.name, &arg.name));
 							args_r.push(format!("{}: &str", &arg.name));
-							format!("{}.as_ptr(), {}.len()", &arg.name, &arg.name)
+							args_usage.push(format!("{}.as_ptr()", &arg.name));
+							args_usage.push(format!("{}.len()", &arg.name));
 						},
 						"[u8]" => {
 							args_x_done = true;
 							args_c.push(format!("{}: *const u8, {}_len: usize", &arg.name, &arg.name));
 							args_r.push(format!("{}: &[u8]", &arg.name));
-							format!("{}.as_ptr(), {}.len()", &arg.name, &arg.name)
+							args_usage.push(format!("{}.as_ptr()", &arg.name));
+							args_usage.push(format!("{}.len()", &arg.name));
 						},
-						_ => format!("{} as *{} {}", &arg.name, select_val(arg.is_const, "const", "mut"), &arg.tp),
+						_ => args_usage.push(format!("{} as *{} {}", &arg.name, select_val(arg.is_const, "const", "mut"), &arg.tp)),
 					}
 				},
-				"CPtr" => format!("{}.addr as * const u8", &arg.name),
+				"CPtr" => args_usage.push(format!("{}.addr as * const u8", &arg.name)),
 				"Option" => match is_ref {
-					true => format!("{}.as_ref().map_or(0 as * const {}, |x| x as * const {})", &arg.name, &arg.tp, &arg.tp),
-					false => format!("{}.map_or(0 as * const {}, |x| x as * const {})", &arg.name, &arg.tp, &arg.tp),
+					true => args_usage.push(format!("{}.as_ref().map_or(0 as * const {}, |x| x as * const {})", &arg.name, &arg.tp, &arg.tp)),
+					false => args_usage.push(format!("{}.map_or(0 as * const {}, |x| x as * const {})", &arg.name, &arg.tp, &arg.tp)),
 				},
 				// this is not tested, normally you should use CPtr<xx> for arguments, don't use these.
-				"SharedPtr"|"UniquePtr" => format!("{}.as_cptr().addr as * const {}", &arg.name, &arg.tp),
-				_ if arg.is_primitive => format!("{}", &arg.name),
+				"SharedPtr"|"UniquePtr" => args_usage.push(format!("{}.as_cptr().addr as * const {}", &arg.name, &arg.tp)),
+				_ if arg.is_primitive => args_usage.push(format!("{}", &arg.name)),
 				_ => {
 					let suggested_str = arg.raw_str.replace(":", ": &");
 					self.err_str = format!("function \"{}\" argument \"{}\" not supported, \
@@ -220,7 +220,6 @@ impl DropSP for {tp} {{
 					return Err(&self.err_str);
 				}
 			};
-			args_usage.push(usage);
 			if !args_x_done {
 				args_c.push(format!("{}: {}", &arg.name, &arg.tp_asc));
 				args_r.push(format!("{}: {}", &arg.name, &arg.tp_full));
@@ -239,6 +238,19 @@ impl DropSP for {tp} {{
 					self.err_str = s.to_string();
 					return Err(&self.err_str);
 				}
+			}
+		}
+		if ! ret_indirect.is_empty() {
+			// \ asm!(\"mov x8, {{xval1}}\", xval1 = in(reg) __rtox8);
+			//asm!(\"mov x8, {{x}}\", x = in(reg) __rtox8);
+			if args_usage.len() > 0 {
+				let idx = args_usage.len() - 1;
+				let s0 = args_usage[idx].as_str();
+				let s0 = format!("{{let __argk={}; asm!(\"mov x8, {{xval1}}\", xval1=in(reg) __rtox8); __argk}}", s0);
+				args_usage[idx] = s0;
+			} else {
+				let s0 = "asm!(\"mov x8, {xval1}\", xval1=in(reg) __rtox8);\n\t\t";
+				ret_indirect += s0;
 			}
 		}
 		let usage = args_usage.join(", ");
