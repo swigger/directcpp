@@ -12,6 +12,8 @@
 #define RUST_VEC_CONTENT(T) size_t cap = 0; T* data = 0; size_t len = 0
 #endif
 
+#define RUST_NULLPTR(T) ((T*)0x1)
+
 // we reimplement the RustVec and RustString in c++ side keeping the same memory layout.
 // so that c++ can readonly process rust structure and vise-versa.
 // note write operations are not allowed because they may using different memory management.
@@ -23,21 +25,21 @@ struct RustVec {
 	const T* end() const { return data + len; }
 	T* begin() { return data; }
 	T* end() { return data + len; }
-	RustVec() { cap = 0; len = 0; data = 0; }
 	~RustVec() { clear(true); }
+	RustVec() { cap = 0; len = 0; data = RUST_NULLPTR(T); }
 	RustVec(const RustVec& ano) {
-		data = nullptr;	len = cap = 0;
+		data = RUST_NULLPTR(T);	len = cap = 0;
 		__set_from(ano.data, ano.len);
 	}
 	RustVec(const T* ptr, size_t cnt) {
-		data = nullptr;	len = cap = 0;
+		data = RUST_NULLPTR(T);	len = cap = 0;
 		__set_from(ptr, cnt);
 	}
 	RustVec(RustVec&& ano) noexcept {
 		len = ano.len;
 		cap = ano.cap;
 		data = ano.data;
-		ano.data = 0;
+		ano.data = RUST_NULLPTR(T);
 		ano.len = 0;
 		ano.cap = 0;
 	}
@@ -61,7 +63,7 @@ struct RustVec {
 		}
 		len = 0;
 		if (free_) {
-			if (data) free(data);
+			if (data_ptr()) free(data);
 			data = 0;
 			cap = 0;
 		}
@@ -72,16 +74,18 @@ struct RustVec {
 			// never need to call the move constructor, just memcpy is enough.
 			// this is not always true for some types like std::string of gcc libstdc++.
 			cap = std::max<uintptr_t>(cap * 2, 32u);
-			data = (T*)realloc((void*)data, sizeof(T) * cap);
+			data = (T*)realloc(data_ptr(), sizeof(T) * cap);
 		}
 		new (data + len) T(t);
 		++len;
 	}
 protected:
+	T* data_ptr() { return data == RUST_NULLPTR(T) ? nullptr : data; }
+	const T* data_ptr() const {	return data == RUST_NULLPTR(T) ? nullptr : data; }
 	void __set_from(const T* data0, size_t len0)
 	{
 		if (cap < len0) {
-			if (data) free(data);
+			if (data_ptr()) free(data);
 			data = (T*)malloc(sizeof(T) * len0);
 			cap = len0;
 		}
@@ -98,22 +102,23 @@ protected:
 
 struct RustString : RustVec<char>
 {
-	~RustString() {	if (data) free(data); data=0;cap=len=0; }
+	~RustString() {	if (data_ptr()) free(data); data=0;cap=len=0; }
 	RustString() = default;
 	RustString(const RustString& ano) : RustVec<char>(ano) {}
 	RustString(RustString&& ano) noexcept : RustVec<char>(std::move(ano)) {}
 	RustString(const char* str) {
-		cap = len = 0; data = 0;
+		cap = len = 0; data = RUST_NULLPTR(char);
 		__set_from(str, strlen(str));
 	}
 	RustString(const char* str, size_t len0) {
-		cap = len = 0; data = 0;
+		cap = len = 0; data = RUST_NULLPTR(char);
 		__set_from(str, len0);
 	}
 	const char* c_str() const {
 		// note: if we are readonly using rust string, it may not be null-terminated.
-		assert(data == 0 || data[len] == 0);
-		return data;
+		auto ret = data_ptr();
+		assert(ret == 0 || ret[len] == 0);
+		return ret;
 	}
 	std::string str() const {
 		return std::string(data, len);
@@ -123,7 +128,7 @@ struct RustString : RustVec<char>
 	}
 
 	RustString& operator=(RustString&& ano) noexcept {
-		if (data) free(data);
+		if (data_ptr()) free(data);
 		cap = len = 0; data = 0;
 		RustVec<char>::operator=(std::move(ano));
 		return *this;
@@ -162,12 +167,12 @@ protected:
 	void __set_from(const char* data0, size_t len0)
 	{
 		if (cap < len0) {
-			if (data) free(data);
+			if (data_ptr()) free(data);
 			data = (char*) malloc(len0+1);
 			cap = len0;
 		}
 		len = len0;
-		if (data) {
+		if (data_ptr()) {
 			memcpy(data, data0, len);
 			data[len] = 0;
 		}
