@@ -58,6 +58,7 @@ pub struct SimpFunc {
 	pub arg_list: Vec<SimpArg>,
 	pub ret: SimpArg,
 	pub is_const: bool,  // const member function
+	pub is_async: bool,
 }
 
 
@@ -277,7 +278,8 @@ impl GccMangler{
 		outs.push_str(&format!("{}{}", name.len(), name));
 	}
 	fn add_type0(&self, vouts: &mut Vec<String>, tp: &str, cvflag: i32) {
-		let reg = r"(const\s+)?(\w+)\s*([&*])";
+		let reg1 = r"\s*(const\s+)?(.*?)([&*])\s*$";
+		let reg2 = r"\s*(std::\s*)?(\w+)<(\w+)>\s*$";
 		let mut outs = String::new();
 		if (cvflag & 1) != 0 {
 			outs.push('K');
@@ -285,20 +287,31 @@ impl GccMangler{
 		if (cvflag & 2) != 0 {
 			outs.push('V');
 		}
-		if let Some(caps) = regex::Regex::new(reg).unwrap().captures(tp) {
+		if let Some(caps) = regex::Regex::new(reg1).unwrap().captures(tp) {
 			if &caps[3] == "&" {
 				outs.push('R');
 			} else if &caps[3] == "*" {
 				outs.push('P');
 			}
-
 			vouts.push(outs);
 			if caps.get(1).is_none() || caps[1].is_empty() {
 				self.add_type0(vouts, &caps[2], 0);
 			} else {
 				self.add_type0(vouts, &caps[2], 1);
 			}
-		} else {
+			return;
+		}
+		if let Some(caps) = regex::Regex::new(reg2).unwrap().captures(tp) {
+			let mut vouts1 = Vec::new();
+			self.add_type0(&mut vouts1, &caps[2], 0);
+			vouts1.push("I".to_string());
+			self.add_type0(&mut vouts1, &caps[3], 0);
+			vouts1.push("E".to_string());
+			vouts.push(vouts1.join(""));
+			return;
+		}
+
+		{
 			match tp {
 				"i32"|"int" => outs.push('i'),
 				"u32"|"uint32_t" => outs.push('j'),
@@ -538,6 +551,14 @@ mod tests {
 			add_arg(&mut func, "const uint8_t*", "e");
 			add_arg(&mut func, "size_t", "f");
 			assert_eq!(mangle_gcc(&func), Ok("_Z7cpp_ptriPKcmS0_PKhm".to_string()));
+		}
+		{
+			let mut func = SimpFunc::default();
+			func.fn_name = "slow_tostr".to_string();
+			set_ret(&mut func, "void");
+			add_arg(&mut func, "ValuePromise<RustString>*", "val");
+			add_arg(&mut func, "int", "val");
+			assert_eq!(mangle_gcc(&func), Ok("_Z10slow_tostrP12ValuePromiseI10RustStringEi".to_string()));
 		}
 	}
 }

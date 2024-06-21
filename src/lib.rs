@@ -1,4 +1,8 @@
+use std::future::Future;
 use std::marker::PhantomData;
+use std::pin::Pin;
+use std::sync::Mutex;
+use std::task::{Context, Poll};
 pub use directcpp_macro::bridge;
 pub use directcpp_macro::enable_msvc_debug;
 
@@ -91,6 +95,57 @@ impl<T> AsCPtr<T> for UniquePtr<T>
 		CPtr::<T> {
 			addr: self.val1,
 			_phantom: PhantomData
+		}
+	}
+}
+
+pub trait ValuePromise {
+	type Output;
+	fn set_value(&self, value: &Self::Output);
+}
+
+
+struct FutureValueInner<T> {
+	value: Option<T>,
+	waker: Option<std::task::Waker>,
+}
+pub struct FutureValue<T> {
+	value: Mutex<FutureValueInner<T>>
+}
+
+impl<T> Future for FutureValue<T> where T: Clone {
+	type Output = T;
+
+	fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+		let mut lock = self.value.lock().unwrap();
+		match lock.value.take() {
+			Some(ss) => Poll::Ready(ss),
+			None => {
+				lock.waker = Some(cx.waker().clone());
+				Poll::Pending
+			}
+		}
+	}
+}
+impl<T> Default for FutureValue<T> {
+	fn default() -> Self {
+		Self {
+			value: Mutex::new(FutureValueInner {
+				value: None,
+				waker: None,
+			})
+		}
+	}
+}
+
+impl<T> ValuePromise for FutureValue<T> where T: Clone {
+	type Output = T;
+
+	fn set_value(&self, value: &T) {
+		let mut lock = self.value.lock().unwrap();
+		lock.value = Some(value.clone());
+		if let Some(w) = lock.waker.as_ref() {
+			w.wake_by_ref();
 		}
 	}
 }

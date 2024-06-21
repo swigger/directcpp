@@ -227,7 +227,7 @@ impl Functions {
 		let mut dest = self.cmo.build_string(ts1, false);
 		let reg1 = self.cmo.build_regex("
 		`(?:  #[] `(\\d+) `)?
-		`( pub `| pub(crate) `\\d+)?
+		`( pub `| pub(crate) `\\d+)? `( async `)?
 		fn   `(`iden`)   ()`(\\d+)
 		`(?: -> `(?: `iden :: `)* `(`iden`| `iden < `iden > `) `)? ;", false).unwrap();
 
@@ -236,7 +236,8 @@ impl Functions {
 		while code_match::test_match(&mut dest, &reg1, &mut vr) {
 			let mut curfunc = SimpFunc::default();
 			curfunc.access = self.cmo.back_str(&vr[1]);
-			curfunc.fn_name = self.cmo.back_str(&vr[2]);
+			curfunc.is_async = !vr[2].is_empty();
+			curfunc.fn_name = self.cmo.back_str(&vr[3]);
 			if let Some(ts) = self.cmo.find_ts(&vr[0]) {
 				let mut ns = String::new();
 				curfunc.klsname = self.parse_attr(ts, &mut ns);
@@ -248,8 +249,8 @@ impl Functions {
 					}
 				}
 			}
-			let ts2 = self.cmo.find_ts(&vr[3]).unwrap();
-			let ret_vec = vr[4].chars().collect::<Vec<char>>();
+			let ts2 = self.cmo.find_ts(&vr[4]).unwrap();
+			let ret_vec = vr[5].chars().collect::<Vec<char>>();
 			curfunc.ret.raw_str = self.cmo.back_str2(ret_vec.iter());
 			curfunc.ret.tp_full = curfunc.ret.raw_str.clone();
 			if ret_vec.len() == 1 {

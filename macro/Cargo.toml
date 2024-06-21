@@ -3,7 +3,7 @@ proc-macro = true
 
 [package]
 name = "directcpp-macro"
-version = "0.1.4"
+version = "0.1.5"
 categories = ["development-tools::ffi", "api-bindings"]
 description = "Direct call cpp from Rust (proc-macro)"
 edition = "2021"

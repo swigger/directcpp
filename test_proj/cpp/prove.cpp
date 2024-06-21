@@ -61,7 +61,7 @@ void on_start() {
 	SetConsoleOutputCP(CP_UTF8);
 
 	char cmd[200];
-	snprintf(cmd, sizeof(cmd), "waitpid %d", (int)GetCurrentProcessId());
+	snprintf(cmd, sizeof(cmd), "waitpid -T 60 %d", (int)GetCurrentProcessId());
 	PROCESS_INFORMATION pinfo{};
 	STARTUPINFOA sinfo = { sizeof(sinfo) };
 	if (CreateProcessA(NULL, cmd, 0, 0, 0, 0, 0, 0, &sinfo, &pinfo))
@@ -97,6 +97,17 @@ namespace myns {
 	RustString get_message() {
 		return "message from c++";
 	}
+}
+
+void slow_tostr(ValuePromise<RustString> * res, int arg)
+{
+	std::thread th([=](){
+		std::this_thread::sleep_for(std::chrono::seconds(1));
+		std::string s1 = "Your number is: " + std::to_string(arg);
+		RustString sv(s1.c_str());
+		res->set_value(sv);
+	});
+	th.detach();
 }
 
 // the only costs in c++ side is to enable some classes and structures for interop.

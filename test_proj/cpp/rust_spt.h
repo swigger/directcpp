@@ -12,6 +12,7 @@
 #define RUST_VEC_CONTENT(T) size_t cap = 0; T* data = 0; size_t len = 0
 #endif
 
+// rust requires the pointer to be aligned and non-null
 #define RUST_NULLPTR(T) ((T*)0x1)
 
 // we reimplement the RustVec and RustString in c++ side keeping the same memory layout.
@@ -214,3 +215,18 @@ namespace ffi
 		force_ref<void(*)(void*)>(&man_dtor_sp<T>);
 	}
 }
+
+template <class T>
+struct ValuePromise {
+	void* opaque_data;
+	struct rust_vtbl {
+		void* drop_in_place;
+		size_t size;
+		size_t align;
+		void (*set_value)(void* opaque_data, const T& v);
+	} * vtbl_;
+
+	void set_value(const T& v) {
+		vtbl_->set_value(opaque_data, v);
+	}
+};

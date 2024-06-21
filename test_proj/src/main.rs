@@ -1,5 +1,7 @@
-use directcpp::{SharedPtr, DropSP, CPtr, AsCPtr};
+use core::pin::Pin;
+use directcpp::{SharedPtr, DropSP, CPtr, AsCPtr, ValuePromise, FutureValue};
 use std::ffi::{CStr, CString};
+use tokio::runtime::Runtime;
 
 #[repr(C)]
 struct MagicIn{
@@ -38,6 +40,8 @@ extern "C++" {
 
 	pub fn get_bin() -> Vec<u8>;
 
+	pub async fn slow_tostr(val: i32) -> String;
+
 	// for complex objects that can only be handled at rust side,
 	// we can always pass its address to cpp side via void* aka *const u8.
 	// so there is nothing special to do here.
@@ -56,6 +60,12 @@ extern "C++" {
 // so we'll force it to do so in a hacker's way and this is the MAGIC!
 #[directcpp::enable_msvc_debug]
 struct Unused;
+
+async fn simple_async_func() {
+	println!("Rust: simple_async_func start!");
+	let s = slow_tostr(42).await;
+	println!("Rust: simple_async_func end with s={}", s);
+}
 
 fn main()
 {
@@ -101,4 +111,7 @@ fn main()
 	println!("\x1b[1;34mLets do magic IO!\x1b[0m");
 	let mgo = on_magic(&mut msgin);
 	println!("Rust: got magic: {:?}", mgo);
+
+	let runtime = Runtime::new().unwrap();
+	runtime.block_on(simple_async_func());
 }
