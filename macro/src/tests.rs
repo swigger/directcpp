@@ -118,12 +118,11 @@ fn test_async() {
 			fn ffi__future_int(addr: usize);
 		}
 		pub async fn future_int() -> i32 {
-			let mut fv = FutureValue::<i32>::default();
-			let dyn_fv = &fv as &dyn ValuePromise<Output=i32>;
-			let dyn_fv_addr = &dyn_fv as *const &dyn ValuePromise<Output=i32> as usize;
-			let pinned_fv = unsafe { Pin::new_unchecked(&mut fv) };
+			let mut arr : [usize;2] = [0, 0];
+			let mut fv = std::pin::pin!(FutureValue::<i32>::default());
+			let dyn_fv_addr = fv.copy_vtbl(&mut arr);
 			unsafe { ffi__future_int(dyn_fv_addr); }
-			pinned_fv.await
+			fv.await
 		}
 	};
 	println!("{}", r1s);

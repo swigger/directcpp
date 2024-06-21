@@ -264,10 +264,10 @@ impl DropSP for {tp} {{
 			self.get_link_name(&func, is_cpp)?
 		};
 		let fnstart = format!("{} {}fn {}({}){}", &func.access,
-		                      if func.is_async { "async " } else { "" },
-			                  &fn_name, args_r.join(", "), return_code_r);
+			if func.is_async { "async " } else { "" },
+			&fn_name, args_r.join(", "), return_code_r);
 		self.extc_code += &format!("\t#[link_name = \"{link_name}\"]\n\tfn ffi__{fn_name}({}){};\n",
-		                           args_c.join(", "), return_code_c);
+			args_c.join(", "), return_code_c);
 		match ret_kind {
 			RetKind::RtPrimitive => {},
 			_ => {
@@ -293,12 +293,11 @@ impl DropSP for {tp} {{
 		let usage = args_usage.join(", ");
 		let norm_code = match ret_kind {
 			RetKind::RtPrimitive if func.is_async => {
-				format!("let mut fv = FutureValue::<{}>::default();\n\
-					let dyn_fv = &fv as &dyn ValuePromise<Output={}>;\n\
-					let dyn_fv_addr = &dyn_fv as *const &dyn ValuePromise<Output={}> as usize;\n\
-					let pinned_fv = unsafe {{ Pin::new_unchecked(&mut fv) }}; \n\
+				format!("let mut arr : [usize;2] = [0, 0];\n\
+					let mut fv= std::pin::pin!(FutureValue::<{}>::default());\n\
+					let dyn_fv_addr = fv.copy_vtbl(&mut arr);\n\
 					unsafe {{ ffi__{fn_name}({usage}); }}\n\
-					pinned_fv.await", &func.ret.tp, &func.ret.tp, &func.ret.tp)
+					fv.await", &func.ret.tp)
 			},
 			RetKind::RtPrimitive => format!("unsafe {{ ffi__{fn_name}({usage}) }}"),
 			RetKind::RtCPtr => format!("CPtr{{ addr: unsafe {{ ffi__{fn_name}({usage}) as usize }}, _phantom: std::marker::PhantomData }}"),

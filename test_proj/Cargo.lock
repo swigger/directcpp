@@ -55,14 +55,15 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "directcpp"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "directcpp-macro",
+ "static_assertions",
 ]
 
 [[package]]
 name = "directcpp-macro"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "cc",
  "lazy_static",
@@ -190,6 +191,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "719b953e2095829ee67db738b3bfa9fa368c94900df327b3f07fe6e794d2fe1f"
 
 [[package]]
+name = "static_assertions"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
 name = "syn"
 version = "2.0.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -202,7 +209,7 @@ dependencies = [
 
 [[package]]
 name = "test_directcpp"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "cc",
  "directcpp",

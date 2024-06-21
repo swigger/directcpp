@@ -113,7 +113,7 @@ pub struct FutureValue<T> {
 	value: Mutex<FutureValueInner<T>>
 }
 
-impl<T> Future for FutureValue<T> where T: Clone {
+impl<T> Future for FutureValue<T> {
 	type Output = T;
 
 	fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -146,6 +146,19 @@ impl<T> ValuePromise for FutureValue<T> where T: Clone {
 		lock.value = Some(value.clone());
 		if let Some(w) = lock.waker.as_ref() {
 			w.wake_by_ref();
+		}
+	}
+}
+
+impl<T> FutureValue<T> where T: Clone {
+	pub fn copy_vtbl(self: &mut Pin<&mut Self>, arr: &mut [usize;2]) -> usize {
+		static_assertions::assert_eq_size!([usize;2], &dyn ValuePromise<Output=String>);
+		let fv = self.as_ref().get_ref() as &dyn ValuePromise<Output=T>;
+		let ptr = &fv as *const &dyn ValuePromise<Output=T> as *const [usize;2];
+		unsafe {
+			arr[0] = (*ptr)[0];
+			arr[1] = (*ptr)[1];
+			arr as *mut [usize;2] as usize
 		}
 	}
 }
