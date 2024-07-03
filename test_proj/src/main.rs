@@ -1,7 +1,7 @@
-use core::pin::Pin;
-use directcpp::{SharedPtr, DropSP, CPtr, AsCPtr, ValuePromise, FutureValue};
+use directcpp::{SharedPtr, DropSP, CPtr, AsCPtr, FutureValue};
 use std::ffi::{CStr, CString};
 use tokio::runtime::Runtime;
+use log;
 
 #[repr(C)]
 struct MagicIn{
@@ -69,7 +69,7 @@ async fn simple_async_func() {
 
 fn main()
 {
-	println!("Hello from rust!");
+	log::info!("Hello from rust!");
 	// let's call the on_start function in CPP!
 	on_start();
 	println!("{}", get_message());

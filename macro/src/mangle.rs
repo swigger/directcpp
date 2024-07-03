@@ -114,7 +114,7 @@ impl MSVCMangler {
 		}
 	}
 	fn add_type(self: &mut Self, tp: &str, _is_const: bool) -> Result<(), &'static str> {
-		let reg1 = r"\s*(const\s+)?(.*?)([&*])\s*$";
+		let reg1 = r"\s*(const\s+)?(.*?)\s*([&*])\s*$";
 		let reg2 = r"\s*(?:std::\s*)?(\w+)<(\w+)>\s*$";
 
 		if let Some(caps) = regex::Regex::new(reg1).unwrap().captures(tp) {
@@ -277,16 +277,10 @@ impl GccMangler{
 	fn add_source_name(outs:&mut String, name: &str) {
 		outs.push_str(&format!("{}{}", name.len(), name));
 	}
-	fn add_type0(&self, vouts: &mut Vec<String>, tp: &str, cvflag: i32) {
-		let reg1 = r"\s*(const\s+)?(.*?)([&*])\s*$";
+	fn add_type0(&self, vouts: &mut Vec<String>, tp: &str) {
+		let reg1 = r"\s*(const\s+)?(.*?)\s*([&*])\s*$";
 		let reg2 = r"\s*(std::\s*)?(\w+)<(\w+)>\s*$";
 		let mut outs = String::new();
-		if (cvflag & 1) != 0 {
-			outs.push('K');
-		}
-		if (cvflag & 2) != 0 {
-			outs.push('V');
-		}
 		if let Some(caps) = regex::Regex::new(reg1).unwrap().captures(tp) {
 			if &caps[3] == "&" {
 				outs.push('R');
@@ -295,17 +289,18 @@ impl GccMangler{
 			}
 			vouts.push(outs);
 			if caps.get(1).is_none() || caps[1].is_empty() {
-				self.add_type0(vouts, &caps[2], 0);
+				self.add_type0(vouts, &caps[2]);
 			} else {
-				self.add_type0(vouts, &caps[2], 1);
+				vouts.push("K".to_string());
+				self.add_type0(vouts, &caps[2]);
 			}
 			return;
 		}
 		if let Some(caps) = regex::Regex::new(reg2).unwrap().captures(tp) {
 			let mut vouts1 = Vec::new();
-			self.add_type0(&mut vouts1, &caps[2], 0);
+			self.add_type0(&mut vouts1, &caps[2]);
 			vouts1.push("I".to_string());
-			self.add_type0(&mut vouts1, &caps[3], 0);
+			self.add_type0(&mut vouts1, &caps[3]);
 			vouts1.push("E".to_string());
 			vouts.push(vouts1.join(""));
 			return;
@@ -336,7 +331,7 @@ impl GccMangler{
 	}
 	fn add_type(self: &mut Self, tp: &str) {
 		let mut vouts = Vec::new();
-		self.add_type0(&mut vouts, tp, 0);
+		self.add_type0(&mut vouts, tp);
 		let mut orig_type = String::new();
 		let mut repl_type = String::new();
 		for i in 0..vouts.len() {
@@ -521,6 +516,16 @@ mod tests {
 		f.ret = f2.arg_list[0].clone();
 	}
 
+	fn should_be(func: &SimpFunc, res: &str, is_gcc:bool) {
+		let res2 = if is_gcc {
+			mangle_gcc(func)
+		} else {
+			mangle_msvc(func)
+		};
+		assert!(res2.is_ok());
+		assert_eq!(res2.unwrap().as_str(), res);
+	}
+
 	#[test]
 	fn test_mangle() {
 		let mut func = SimpFunc::default();
@@ -560,5 +565,15 @@ mod tests {
 			add_arg(&mut func, "int", "val");
 			assert_eq!(mangle_gcc(&func), Ok("_Z10slow_tostrP12ValuePromiseI10RustStringEi".to_string()));
 		}
+	}
+
+	#[test]
+	fn test_mangle2(){
+		let mut func = SimpFunc::default();
+		func.fn_name = "foo".to_string();
+		set_ret(&mut func, "void");
+		add_arg(&mut func, "const RustString &", "a");
+		add_arg(&mut func, "const RustString &", "b");
+		should_be(&func, "_Z3fooRK10RustStringS1_", true);
 	}
 }

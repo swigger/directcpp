@@ -309,10 +309,13 @@ impl DropSP for {tp} {{
 					\t__rto")
 			},
 			RetKind::RtObject => {
-				let ret_type = &func.ret.tp_full as &str;
+				let mut ret_type = &func.ret.tp_full as &str;
 				let tp1 = func.ret.tp_cpp.replace("<", "_").replace(">", "_");
 				let call_free = match func.ret.tp_wrap.as_str() {
-					"POD" => "".to_string(),  // no destructor for POD
+					"POD" => {
+						ret_type = &func.ret.tp as &str;
+						"".to_string()
+					},  // no destructor for POD
 					_ => format!("ffi__free_{}(&mut __rta as *mut usize);\n\t\t", &tp1),
 				};
 				format!("const SZ:usize = (std::mem::size_of::<{ret_type}>()+16)/8;\n\

@@ -36,7 +36,7 @@ fn to_string(ts: TokenStream) -> String {
 		} else if ch.is_ascii_whitespace() {
 			last_ch = Some(ch);
 			continue;
-		} else if ch.is_ascii_punctuation() {
+		} else if ch != '_' && ch.is_ascii_punctuation() {
 			outs.push(ch);
 			if ch == '{' || ch == '}' || (ch == ';' && in_quote==0) {
 				outs.push('\n');
@@ -89,13 +89,13 @@ fn test_cstr() {
 	};
 	let mut bb = FFIBuilder::new();
 	let expect = quote::quote! {
-extern "C" {
-	#[link_name="?cpp_ptr@ns_bar@ns_foo@@YAHPEBD0_KPEBE1@Z"]
-	fn ffi__cpp_ptr(foo:*const i8,bar:*const u8,bar_len:usize,baz:*const u8,baz_len:usize)->i32;
-}
-pub fn cpp_ptr(foo:&CStr,bar:&str,baz:&[u8])->i32{
-	unsafe { ffi__cpp_ptr(foo.as_ptr(),bar.as_ptr(),bar.len(),baz.as_ptr(),baz.len()) }
-}
+		extern "C" {
+			#[link_name="?cpp_ptr@ns_bar@ns_foo@@YAHPEBD0_KPEBE1@Z"]
+			fn ffi__cpp_ptr(foo:*const i8,bar:*const u8,bar_len:usize,baz:*const u8,baz_len:usize)->i32;
+		}
+		pub fn cpp_ptr(foo:&CStr,bar:&str,baz:&[u8])->i32 {
+			unsafe { ffi__cpp_ptr(foo.as_ptr(),bar.as_ptr(),bar.len(),baz.as_ptr(),baz.len()) }
+		}
 	};
 	assert_eq!(to_string(bb.build_bridge_code(input).unwrap()), to_string(expect));
 }
@@ -130,6 +130,38 @@ fn test_async() {
 }
 
 #[test]
+fn test_pod() {
+	let input_ts = quote::quote! {
+		extern "C++" {
+			pub fn get_logger() -> POD<DynLogger>;
+		}
+	};
+	let mut bb = FFIBuilder::new();
+	let r1 = bb.build_bridge_code(input_ts);
+	if let Err(es) = r1 {
+		println!("{}", es);
+	}
+	assert!(r1.is_ok());
+	let r1s = to_string(r1.unwrap());
+	let expected = quote::quote! {
+		extern "C"{
+			#[link_name="?get_logger@@YA?AUDynLogger@@XZ"]
+			fn ffi__get_logger(__rto:*mut usize);
+		}
+		pub fn get_logger()->DynLogger{
+			const SZ:usize=(std::mem::size_of::<DynLogger>()+16)/8;
+			let mut __rta:[usize;SZ]=[0;SZ];
+			unsafe{
+				ffi__get_logger(&mut __rta as*mut usize);
+				let __rto=(*(&__rta as*const usize as*const DynLogger)).clone();
+				__rto
+			}
+		}
+	};
+	assert_eq!(r1s, to_string(expected));
+}
+
+#[test]
 fn it_works() {
 	let ts = quote::quote!(
 		extern "C++" {
@@ -150,7 +182,7 @@ fn it_works() {
 				}
 			}
 		}
-		pub fn cpp_ptr (xx : i32) -> SharedPtr<CppStruct>{
+		pub fn cpp_ptr (xx : i32) -> SharedPtr<CppStruct> {
 			let mut __rto = SharedPtr::<CppStruct>::default();
 			unsafe {
 				ffi__cpp_ptr (&mut __rto as * mut SharedPtr<CppStruct> as * mut u8, xx);
@@ -164,7 +196,6 @@ fn it_works() {
 	assert!(r1.is_ok());
 	let r1 = to_string(r1.unwrap());
 	assert_eq!(r1, to_string(resp));
-	//println!("{}", r1);
 
 	let ts = quote::quote!(
 		extern "C++" {
@@ -172,22 +203,24 @@ fn it_works() {
 		}
 	);
 	let expect = quote::quote! {
-extern "C"{
-#[link_name="?on_magic@@YA?AUMagicOut@@AEAUMagicIn@@PEAVCppStruct@@@Z"]fn ffi__on_magic(__rto:*mut usize,magic:*mut MagicIn,cs:*const u8);
-#[link_name="??$man_dtor@UMagicOut@@@ffi@@YAXPEAX@Z"]fn ffi__free_MagicOut(__o:*mut usize);
-}
-pub fn on_magic(magic:&mut MagicIn,cs:CPtr<CppStruct>)->MagicOut{
-const SZ:usize=(std::mem::size_of::<MagicOut>()+16)/8;
-let mut__rta:[usize;SZ]=[0;SZ];
-unsafe{
-ffi__on_magic(&mut__rta as*mut usize,magic as*mut MagicIn,cs.addr as*const u8);
-let__rto=(*(&__rta as*const usize as*const MagicOut)).clone();
-ffi__free_MagicOut(&mut__rta as*mut usize);
-__rto}
-}
+		extern "C" {
+			#[link_name="?on_magic@@YA?AUMagicOut@@AEAUMagicIn@@PEAVCppStruct@@@Z"]
+			fn ffi__on_magic(__rto:*mut usize,magic:*mut MagicIn,cs:*const u8);
+			#[link_name="??$man_dtor@UMagicOut@@@ffi@@YAXPEAX@Z"]
+			fn ffi__free_MagicOut(__o:*mut usize);
+		}
+		pub fn on_magic(magic:&mut MagicIn,cs:CPtr<CppStruct>)->MagicOut{
+			const SZ:usize=(std::mem::size_of::<MagicOut>()+16)/8;
+			let mut __rta:[usize;SZ]=[0;SZ];
+			unsafe {
+				ffi__on_magic(&mut __rta as*mut usize,magic as*mut MagicIn,cs.addr as*const u8);
+				let __rto=(*(&__rta as*const usize as*const MagicOut)).clone();
+				ffi__free_MagicOut(&mut __rta as*mut usize);
+				__rto
+			}
+		}
 	};
 	assert_eq!(to_string( bb.build_bridge_code(ts).unwrap()   ), to_string(expect));
-
 	let ts = quote::quote!(
 		extern "C++" {
 			#[member_of(CppStruct)]

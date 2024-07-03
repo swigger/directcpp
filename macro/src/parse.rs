@@ -140,7 +140,7 @@ impl Functions {
 				}
 			}
 			"" if arg.is_primitive => cpp_type.to_string(),
-			"" if arg.name=="" => { //a return value.
+			""|"POD" if arg.name=="" => { //a return value.
 				let _ = set_class_hint(&arg.tp, ClassHint::WeakStruct);
 				cpp_type.to_string()
 			}
