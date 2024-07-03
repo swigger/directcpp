@@ -27,7 +27,7 @@ pub use directcpp_macro::bridge;
 /// Allow link to msvc debug runtime.
 /// # Examples
 /// ```
-/// use directcpp_macro::enable_msvc_debug;
+/// use directcpp::enable_msvc_debug;
 /// #[enable_msvc_debug]
 /// struct UnusedStruct;
 /// ```
