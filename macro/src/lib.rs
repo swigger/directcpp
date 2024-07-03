@@ -362,23 +362,6 @@ extern "C" {
 	fn enable_msvc_debug_c();
 }
 
-/// Generate bridge code for C++ functions.
-/// # Examples
-/// ```
-/// #[bridge]
-/// extern "C++" {
-/// 	pub fn on_start();
-/// }
-/// ```
-/// This generates the following code:
-/// ```
-/// extern "C" {
-///     #[link_name = "?on_start@@YAXXZ"]
-///     fn ffi__on_start();
-/// }
-/// pub fn on_start() { unsafe { ffi__on_start() } }
-/// ```
-/// See the [README](https://github.com/swigger/directcpp/) for more details.
 #[proc_macro_attribute]
 pub fn bridge(_args: TS0, input: TS0) -> TS0 {
 	let mut bb = FFIBuilder::new();
@@ -388,14 +371,6 @@ pub fn bridge(_args: TS0, input: TS0) -> TS0 {
 	}
 }
 
-/// Allow link to msvc debug runtime.
-/// # Examples
-/// ```
-/// #[enable_msvc_debug]
-/// struct UnusedStruct;
-/// ```
-/// This generates nothing, but it works silently background in a hacker's way.
-///
 #[proc_macro_attribute]
 pub fn enable_msvc_debug(args: TS0, _input: TS0) -> TS0
 {

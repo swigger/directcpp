@@ -3,7 +3,36 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Mutex;
 use std::task::{Context, Poll};
+
+/// Generate bridge code for C++ functions.
+/// # Examples
+/// ```
+/// use directcpp::bridge;
+/// #[bridge]
+/// extern "C++" {
+/// 	pub fn on_start();
+/// }
+/// ```
+/// This generates the following code:
+/// ```
+/// extern "C" {
+///     #[link_name = "?on_start@@YAXXZ"]
+///     fn ffi__on_start();
+/// }
+/// pub fn on_start() { unsafe { ffi__on_start() } }
+/// ```
+/// See the [README](https://github.com/swigger/directcpp/) for more details.
 pub use directcpp_macro::bridge;
+
+/// Allow link to msvc debug runtime.
+/// # Examples
+/// ```
+/// use directcpp_macro::enable_msvc_debug;
+/// #[enable_msvc_debug]
+/// struct UnusedStruct;
+/// ```
+/// This generates nothing, but it works silently background in a hacker's way.
+///
 pub use directcpp_macro::enable_msvc_debug;
 
 // implies the value is POD so no dtor is needed, it's just copied.
