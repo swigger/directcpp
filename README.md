@@ -55,9 +55,9 @@ To do this , the `MagicIn` and `MagicOut` struct should have exactly the same me
 
 You can also get a class object pointer from c++ side and call its member functions while keeping the safety by `SharedPtr`/`std::shared_ptr` in rust/c++, respectively. Check code in [test\_proj](https://github.com/swigger/directcpp/tree/master/test_proj).
 
-You may need to generate some code in your way, thought, as I used a python script to generate some c++ structure from rust, keeping the same memory layout of the them, like `MagicIn` and `MagicOut`. The python code is not a part of `directcpp`, but they with other stuff all work together to make  the final product. So `directcpp` is a loosely organized library which offers the most freedom, but it may take you a little time to get used to it.
+You may need to generate some code in your way, thought, as I used `rust2h.py` to generate some c++ structure from rust, keeping the same memory layout of the them, like `MagicIn` and `MagicOut`. The `rust2h.py` should not be considered be a part of `directcpp`, but they with other stuff all work together to make the final product. So `directcpp` is a loosely organized library which offers the most freedom, but it may take you a little time to get used to it.
 
-If you really like my python version code converter to generate c++ version struct from rust version struct, I can put it on `github` later. However, convert such structures is not hard, you can even do that by some text manipulation tools like`sed`.
+I have put `rust2h.py` into tools folder. However, convert such structures is not hard, you can even do that by some text manipulation tools like `sed`.
 
 ## Special Mappings
 
