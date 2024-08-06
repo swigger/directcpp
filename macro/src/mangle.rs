@@ -277,36 +277,55 @@ impl GccMangler{
 	fn add_source_name(outs:&mut String, name: &str) {
 		outs.push_str(&format!("{}{}", name.len(), name));
 	}
-	fn add_type0(&self, vouts: &mut Vec<String>, tp: &str) {
+	fn fmt_packed(val: usize) -> String {
+		if val == 0 {
+			"S_".to_string()
+		} else {
+			format!("S{}_", Self::format_radix((val-1) as u128, 36))
+		}
+	}
+	fn add_type0(&mut self, tp: &str) -> (String,String) {
 		let reg1 = r"\s*(const\s+)?(.*?)\s*([&*])\s*$";
 		let reg2 = r"\s*(std::\s*)?(\w+)<(\w+)>\s*$";
-		let mut outs = String::new();
 		if let Some(caps) = regex::Regex::new(reg1).unwrap().captures(tp) {
+			let mut vouts = Vec::new();
 			if &caps[3] == "&" {
-				outs.push('R');
+				vouts.push("R".to_string());
 			} else if &caps[3] == "*" {
-				outs.push('P');
+				vouts.push("P".to_string());
 			}
-			vouts.push(outs);
-			if caps.get(1).is_none() || caps[1].is_empty() {
-				self.add_type0(vouts, &caps[2]);
-			} else {
+			if !(caps.get(1).is_none() || caps[1].is_empty()) {
 				vouts.push("K".to_string());
-				self.add_type0(vouts, &caps[2]);
 			}
-			return;
+			let (mut full, mut packed) = self.add_type0(&caps[2]);
+			while ! vouts.is_empty() {
+				let tag = vouts.pop().unwrap();
+				full = tag.clone() + &full;
+				packed = tag + &packed;
+				let v0 = self.subs.insert(full.clone(), self.subs_cnt);
+				match v0 {
+					Some(val) => packed = Self::fmt_packed(val),
+					None => self.subs_cnt += 1
+				}
+			}
+			return (full, packed);
 		}
 		if let Some(caps) = regex::Regex::new(reg2).unwrap().captures(tp) {
-			let mut vouts1 = Vec::new();
-			self.add_type0(&mut vouts1, &caps[2]);
-			vouts1.push("I".to_string());
-			self.add_type0(&mut vouts1, &caps[3]);
-			vouts1.push("E".to_string());
-			vouts.push(vouts1.join(""));
-			return;
+			let (mut full, mut packed) = self.add_type0(&caps[2]);
+			full.push('I'); packed.push('I');
+			let (f2, p2) = self.add_type0(&caps[3]);
+			full.push_str(&f2); packed.push_str(&p2);
+			full.push('E'); packed.push('E');
+			match self.subs.insert(full.clone(), self.subs_cnt) {
+				Some(val) => packed = Self::fmt_packed(val),
+				None => self.subs_cnt += 1
+			}
+			return (full, packed);
 		}
 
 		{
+			let mut outs = String::new();
+			let mut may_packed = None;
 			match tp {
 				"i32"|"int" => outs.push('i'),
 				"u32"|"uint32_t" => outs.push('j'),
@@ -323,38 +342,22 @@ impl GccMangler{
 				"f64"|"double" => outs.push('d'),
 				""|"()"|"void" => outs.push('v'),
 				_ => {
-					Self::add_source_name(&mut outs, tp);
+					outs = format!("{}{}", tp.len(), tp);
+					match self.subs.insert(outs.clone(), self.subs_cnt) {
+						Some(val) => may_packed = Some(Self::fmt_packed(val)),
+						None => self.subs_cnt += 1
+					}
 				},
 			}
-			vouts.push(outs);
+			match may_packed {
+				Some(packed) => (outs, packed),
+				None => (outs.clone(), outs)
+			}
 		}
 	}
 	fn add_type(self: &mut Self, tp: &str) {
-		let mut vouts = Vec::new();
-		self.add_type0(&mut vouts, tp);
-		let mut orig_type = String::new();
-		let mut repl_type = String::new();
-		for i in 0..vouts.len() {
-			let from = vouts.len()-1-i;
-			let itm = vouts[from].as_str();
-			orig_type = format!("{}{}", itm, orig_type.as_str());
-			repl_type = format!("{}{}", itm, repl_type.as_str());
-			if i == 0 && itm.len() == 1 {
-				// primitive type
-				continue;
-			}
-			if let Some(&idx) = self.subs.get(orig_type.as_str()) {
-				if idx == 0 {
-					repl_type = "S_".to_string();
-				} else {
-					repl_type = format!("S{}_", Self::format_radix((idx-1) as u128, 36));
-				}
-			} else {
-				self.subs.insert(orig_type.clone(), self.subs_cnt);
-				self.subs_cnt += 1;
-			}
-		}
-		self.sout.push_str(repl_type.as_str());
+		let (_, packed) = self.add_type0(tp);
+		self.sout.push_str(packed.as_str());
 	}
 
 	fn add_source_name_n(self: &mut Self, name1: &str, name2: &str, tt: Option<&Vec<String>>) -> Result<bool,&'static str> {
@@ -565,6 +568,14 @@ mod tests {
 			add_arg(&mut func, "int", "val");
 			assert_eq!(mangle_gcc(&func), Ok("_Z10slow_tostrP12ValuePromiseI10RustStringEi".to_string()));
 		}
+		{
+			let mut func = SimpFunc::default();
+			func.fn_name = "foo".to_string();
+			set_ret(&mut func, "void");
+			add_arg(&mut func, "const RustString &", "a");
+			add_arg(&mut func, "const RustString &", "b");
+			should_be(&func, "_Z3fooRK10RustStringS1_", true);
+		}
 	}
 
 	#[test]
@@ -572,8 +583,8 @@ mod tests {
 		let mut func = SimpFunc::default();
 		func.fn_name = "foo".to_string();
 		set_ret(&mut func, "void");
-		add_arg(&mut func, "const RustString &", "a");
+		add_arg(&mut func, "tpl<RustString>*", "a");
 		add_arg(&mut func, "const RustString &", "b");
-		should_be(&func, "_Z3fooRK10RustStringS1_", true);
+		should_be(&func, "_Z3fooP3tplI10RustStringERKS0_", true);
 	}
 }
