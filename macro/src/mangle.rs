@@ -277,13 +277,24 @@ impl GccMangler{
 	fn add_source_name(outs:&mut String, name: &str) {
 		outs.push_str(&format!("{}{}", name.len(), name));
 	}
-	fn fmt_packed(val: usize) -> String {
-		if val == 0 {
-			"S_".to_string()
-		} else {
-			format!("S{}_", Self::format_radix((val-1) as u128, 36))
+
+	fn gen_packed(&mut self, full: &str, old_packed: String) -> String {
+		match self.subs.get(full) {
+			Some(val) => {
+				if *val == 0 {
+					"S_".to_string()
+				} else {
+					format!("S{}_", Self::format_radix((*val-1) as u128, 36))
+				}
+			}
+			None => {
+				self.subs.insert(full.to_string(), self.subs_cnt);
+				self.subs_cnt += 1;
+				old_packed
+			}
 		}
 	}
+
 	fn add_type0(&mut self, tp: &str) -> (String,String) {
 		let reg1 = r"\s*(const\s+)?(.*?)\s*([&*])\s*$";
 		let reg2 = r"\s*(std::\s*)?(\w+)<(\w+)>\s*$";
@@ -301,12 +312,7 @@ impl GccMangler{
 			while ! vouts.is_empty() {
 				let tag = vouts.pop().unwrap();
 				full = tag.clone() + &full;
-				packed = tag + &packed;
-				let v0 = self.subs.insert(full.clone(), self.subs_cnt);
-				match v0 {
-					Some(val) => packed = Self::fmt_packed(val),
-					None => self.subs_cnt += 1
-				}
+				packed = self.gen_packed(&full, tag + &packed);
 			}
 			return (full, packed);
 		}
@@ -316,10 +322,7 @@ impl GccMangler{
 			let (f2, p2) = self.add_type0(&caps[3]);
 			full.push_str(&f2); packed.push_str(&p2);
 			full.push('E'); packed.push('E');
-			match self.subs.insert(full.clone(), self.subs_cnt) {
-				Some(val) => packed = Self::fmt_packed(val),
-				None => self.subs_cnt += 1
-			}
+			packed = self.gen_packed(&full, packed);
 			return (full, packed);
 		}
 
@@ -343,10 +346,7 @@ impl GccMangler{
 				""|"()"|"void" => outs.push('v'),
 				_ => {
 					outs = format!("{}{}", tp.len(), tp);
-					match self.subs.insert(outs.clone(), self.subs_cnt) {
-						Some(val) => may_packed = Some(Self::fmt_packed(val)),
-						None => self.subs_cnt += 1
-					}
+					may_packed = Some(self.gen_packed(&outs, outs.clone()));
 				},
 			}
 			match may_packed {
@@ -576,6 +576,14 @@ mod tests {
 			add_arg(&mut func, "const RustString &", "b");
 			should_be(&func, "_Z3fooRK10RustStringS1_", true);
 		}
+		{
+			let mut func = SimpFunc::default();
+			func.fn_name = "foo".to_string();
+			set_ret(&mut func, "void");
+			add_arg(&mut func, "tpl<RustString>*", "a");
+			add_arg(&mut func, "const RustString &", "b");
+			should_be(&func, "_Z3fooP3tplI10RustStringERKS0_", true);
+		}
 	}
 
 	#[test]
@@ -583,8 +591,10 @@ mod tests {
 		let mut func = SimpFunc::default();
 		func.fn_name = "foo".to_string();
 		set_ret(&mut func, "void");
-		add_arg(&mut func, "tpl<RustString>*", "a");
-		add_arg(&mut func, "const RustString &", "b");
-		should_be(&func, "_Z3fooP3tplI10RustStringERKS0_", true);
+		add_arg(&mut func, "AA*", "a");
+		add_arg(&mut func, "BB*", "b");
+		add_arg(&mut func, "AA", "c");
+		add_arg(&mut func, "AA", "d");
+		should_be(&func, "_Z3fooP2AAP2BBS_S_", true);
 	}
 }

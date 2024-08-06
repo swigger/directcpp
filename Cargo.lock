@@ -19,7 +19,7 @@ checksum = "2678b2e3449475e95b0aa6f9b506a28e61b3dc8996592b983695e8ebb58a8b41"
 
 [[package]]
 name = "directcpp"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "directcpp-macro",
  "static_assertions",
@@ -27,7 +27,7 @@ dependencies = [
 
 [[package]]
 name = "directcpp-macro"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "cc",
  "lazy_static",
