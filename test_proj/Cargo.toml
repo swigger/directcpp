@@ -9,7 +9,7 @@ rust-version = "1.76"
 
 [dependencies]
 directcpp={path=".."}
-tokio = { version = "1.38.0", features = ["rt", "rt-multi-thread"] }
+tokio = { version = "1.38.0", features = ["rt", "rt-multi-thread", "macros", "sync"] }
 log = "0.4.21"
 
 [build-dependencies]

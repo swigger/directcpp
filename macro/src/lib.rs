@@ -293,10 +293,8 @@ impl DropSP for {tp} {{
 		let usage = args_usage.join(", ");
 		let norm_code = match ret_kind {
 			RetKind::RtPrimitive if func.is_async => {
-				format!("let mut arr : [usize;2] = [0, 0];\n\
-					let mut fv= std::pin::pin!(FutureValue::<{}>::default());\n\
-					let dyn_fv_addr = fv.copy_vtbl(&mut arr);\n\
-					unsafe {{ ffi__{fn_name}({usage}); }}\n\
+				format!("let mut fv= FutureValue::<{}>::default();\n\
+					unsafe {{ let dyn_fv_addr = fv.to_ptr(); ffi__{fn_name}({usage}); }}\n\
 					fv.await", &func.ret.tp)
 			},
 			RetKind::RtPrimitive => format!("unsafe {{ ffi__{fn_name}({usage}) }}"),

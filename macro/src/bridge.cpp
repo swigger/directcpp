@@ -253,6 +253,12 @@ protected:
 				m_dirty = true;
 				break;
 			}
+			else if (wcsicmp(ss.c_str(), L"/defaultlib:msvcrt") == 0 ||
+				wcsicmp(ss.c_str(), L"/defaultlib:msvcrt.lib") == 0) {
+				ss = L"/defaultlib:msvcrtd";
+				m_dirty = true;
+				break;
+			}
 		}
 	}
 };
@@ -387,7 +393,7 @@ extc void enable_msvc_debug_c() {
 	if (old_CreateProcessW) return;
 	(FARPROC&) old_CreateProcessW = GetProcAddress(GetModuleHandleA("kernel32.dll"), "CreateProcessW");
 
-	HMODULE dll = FindDll(L"std-[0-9A-Fa-f]+.dll");
+	HMODULE dll = FindDll(L"(?:std|rustc_driver)-[0-9A-Fa-f]+\\.dll");
 	void** pos = 0;
 	if (dll && FindIAT(dll, "kernel32.dll", "CreateProcessW", &pos)) {
 		write_ptr(pos, myCreateProcessW);

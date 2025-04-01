@@ -13,7 +13,14 @@
 #endif
 
 // rust requires the pointer to be aligned and non-null
-#define RUST_NULLPTR(T) ((T*)0x1)
+#define RUST_NULLPTR(T) ((T*)__alignof(T))
+#define RUST_IS_NULLPTR2(T, ptr) ((size_t)(ptr) <= __alignof(T))
+#define RUST_IS_NULLPTR(ptr) ((size_t)(ptr) <= __alignof(decltype(*ptr)))
+
+struct rust_refstr_t {
+	const char* data;
+	size_t len;
+};
 
 // we reimplement the RustVec and RustString in c++ side keeping the same memory layout.
 // so that c++ can readonly process rust structure and vise-versa.
@@ -44,6 +51,10 @@ struct RustVec {
 		ano.len = 0;
 		ano.cap = 0;
 	}
+	void assign(const T* ptr, size_t cnt) {
+		clear();
+		__set_from(ptr, cnt);
+	}
 	RustVec& operator = (const RustVec& ano) {
 		clear();
 		__set_from(ano.data, ano.len);
@@ -65,7 +76,7 @@ struct RustVec {
 		len = 0;
 		if (free_) {
 			if (data_ptr()) free(data);
-			data = 0;
+			data = RUST_NULLPTR(T);
 			cap = 0;
 		}
 	}
@@ -75,16 +86,20 @@ struct RustVec {
 			// never need to call the move constructor, just memcpy is enough.
 			// this is not always true for some types like std::string of gcc libstdc++.
 			cap = std::max<uintptr_t>(cap * 2, 32u);
-			data = (T*)realloc(data_ptr(), sizeof(T) * cap);
+			void* old_dp = data_ptr();
+			data = (T*)realloc(old_dp, sizeof(T) * cap);
 		}
 		new (data + len) T(t);
 		++len;
 	}
+	T* data_ptr() { return RUST_IS_NULLPTR(data) ? nullptr : data; }
+	const T* data_ptr() const {	return RUST_IS_NULLPTR(data) ? nullptr : data; }
+	size_t size() const { return len; }
+	bool empty() const { return len == 0; }
 protected:
-	T* data_ptr() { return data == RUST_NULLPTR(T) ? nullptr : data; }
-	const T* data_ptr() const {	return data == RUST_NULLPTR(T) ? nullptr : data; }
 	void __set_from(const T* data0, size_t len0)
 	{
+		// predicate: len is 0.
 		if (cap < len0) {
 			if (data_ptr()) free(data);
 			data = (T*)malloc(sizeof(T) * len0);
@@ -105,7 +120,9 @@ struct RustString : RustVec<char>
 {
 	~RustString() {	if (data_ptr()) free(data); data=0;cap=len=0; }
 	RustString() = default;
-	RustString(const RustString& ano) : RustVec<char>(ano) {}
+	RustString(const RustString& ano) : RustVec<char>() {
+		__set_from(ano.data_ptr(), ano.len);
+	}
 	RustString(RustString&& ano) noexcept : RustVec<char>(std::move(ano)) {}
 	RustString(const char* str) {
 		cap = len = 0; data = RUST_NULLPTR(char);
@@ -127,7 +144,10 @@ struct RustString : RustVec<char>
 	std::string_view view() const {
 		return std::string_view(data, len);
 	}
-
+	void assign(const char* ptr, size_t cnt) {
+		clear();
+		__set_from(ptr, cnt);
+	}
 	RustString& operator=(RustString&& ano) noexcept {
 		if (data_ptr()) free(data);
 		cap = len = 0; data = 0;
@@ -218,15 +238,11 @@ namespace ffi
 
 template <class T>
 struct ValuePromise {
-	void* opaque_data;
-	struct rust_vtbl {
-		void* drop_in_place;
-		size_t size;
-		size_t align;
-		void (*set_value)(void* opaque_data, const T& v);
-	} * vtbl_;
+	size_t strong_refc;
+	size_t weak_refc;
+	void (*f_set_value)(ValuePromise<T>* self, const T* ptr);
 
 	void set_value(const T& v) {
-		vtbl_->set_value(opaque_data, v);
+		f_set_value(this, &v);
 	}
 };

@@ -1,9 +1,8 @@
 use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, atomic::{AtomicUsize, Ordering}};
 use std::task::{Context, Poll};
-
 /// Generate bridge code for C++ functions.
 /// # Examples
 /// ```
@@ -128,66 +127,60 @@ impl<T> AsCPtr<T> for UniquePtr<T>
 	}
 }
 
-pub trait ValuePromise {
-	type Output;
-	fn set_value(&self, value: &Self::Output);
-}
-
-
+#[repr(C)]
 struct FutureValueInner<T> {
-	value: Option<T>,
-	waker: Option<std::task::Waker>,
+	f_set_value: fn(usize, &T),
+	value: Mutex<(Option<T>, Option<std::task::Waker>)>
 }
 pub struct FutureValue<T> {
-	value: Mutex<FutureValueInner<T>>
+	value: Arc<FutureValueInner<T>>
 }
 
 impl<T> Future for FutureValue<T> {
 	type Output = T;
 
 	fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-		let mut lock = self.value.lock().unwrap();
-		match lock.value.take() {
+		let mut lock = self.value.value.lock().unwrap();
+		match lock.0.take() {
 			Some(ss) => Poll::Ready(ss),
 			None => {
-				lock.waker = Some(cx.waker().clone());
+				lock.1 = Some(cx.waker().clone());
 				Poll::Pending
 			}
 		}
 	}
 }
-impl<T> Default for FutureValue<T> {
+
+impl<T> Default for FutureValue<T> where T:Clone {
 	fn default() -> Self {
 		Self {
-			value: Mutex::new(FutureValueInner {
-				value: None,
-				waker: None,
+			value: Arc::new(FutureValueInner {
+				f_set_value: Self::set_value,
+				value: Mutex::new((None, None))
 			})
 		}
 	}
 }
 
-impl<T> ValuePromise for FutureValue<T> where T: Clone {
-	type Output = T;
-
-	fn set_value(&self, value: &T) {
-		let mut lock = self.value.lock().unwrap();
-		lock.value = Some(value.clone());
-		if let Some(w) = lock.waker.as_ref() {
+impl<T> FutureValue<T> where T: Clone {
+	pub unsafe fn to_ptr(&mut self) -> usize {
+		let p1 = self as *mut Self as *mut *mut AtomicUsize;
+		(**p1).fetch_add(1, Ordering::Relaxed);
+		(*p1) as usize
+	}
+	pub fn set_value(addr: usize, value: &T) {
+		let con_addr = addr;
+		let p1 = unsafe { &*(&con_addr as *const usize as *mut Self) };
+		let mut lock = p1.value.value.lock().unwrap();
+		lock.0 = Some(value.clone());
+		let value_clone = p1.value.clone();
+		unsafe {
+			let au = addr as *mut AtomicUsize;
+			(*au).fetch_sub(1, Ordering::Relaxed);
+		}
+		if let Some(w) = lock.1.as_ref() {
 			w.wake_by_ref();
 		}
-	}
-}
-
-impl<T> FutureValue<T> where T: Clone {
-	pub fn copy_vtbl(self: &mut Pin<&mut Self>, arr: &mut [usize;2]) -> usize {
-		static_assertions::assert_eq_size!([usize;2], &dyn ValuePromise<Output=String>);
-		let fv = self.as_ref().get_ref() as &dyn ValuePromise<Output=T>;
-		let ptr = &fv as *const &dyn ValuePromise<Output=T> as *const [usize;2];
-		unsafe {
-			arr[0] = (*ptr)[0];
-			arr[1] = (*ptr)[1];
-			arr as *mut [usize;2] as usize
-		}
+		drop(value_clone);
 	}
 }

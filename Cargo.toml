@@ -1,6 +1,6 @@
 [package]
 name = "directcpp"
-version = "0.1.9"
+version = "0.1.10"
 categories = ["development-tools::ffi", "api-bindings"]
 description = "Direct call cpp from Rust"
 edition = "2021"
@@ -12,5 +12,5 @@ repository = "https://github.com/swigger/directcpp"
 rust-version = "1.77"
 
 [dependencies]
-directcpp-macro = { path="macro", version = "0.1.9" }
+directcpp-macro = { path="macro", version = "0.1.10" }
 static_assertions = "1.1.0"

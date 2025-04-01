@@ -1,6 +1,9 @@
 use directcpp::{SharedPtr, DropSP, CPtr, AsCPtr, FutureValue};
 use std::ffi::{CStr, CString};
+use std::thread::sleep;
+use std::time::Duration;
 use tokio::runtime::Runtime;
+use tokio::sync::oneshot;
 use log;
 
 #[repr(C)]
@@ -65,6 +68,18 @@ async fn simple_async_func() {
 	println!("Rust: simple_async_func start!");
 	let s = slow_tostr(42).await;
 	println!("Rust: simple_async_func end with s={}", s);
+	let (tx1, rx1) = oneshot::channel();
+	tokio::spawn(async {
+		let _ = tx1.send("one");
+	});
+	tokio::select! {
+        val = rx1 => {
+            println!("rx1 completed first with {:?}", val);
+        }
+        val = slow_tostr(99) => {
+            println!("got slow str {}", val);
+        }
+    }
 }
 
 fn main()
@@ -114,4 +129,5 @@ fn main()
 
 	let runtime = Runtime::new().unwrap();
 	runtime.block_on(simple_async_func());
+	sleep(Duration::from_secs(2))
 }
