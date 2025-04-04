@@ -5,7 +5,7 @@ mod util;
 mod tests;
 
 use parse::{Functions, map_to_cxx};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use proc_macro2::{TokenStream, Span};
 use proc_macro::{TokenStream as TS0, TokenTree};
 use std::env;
@@ -35,7 +35,12 @@ pub(crate) struct FFIBuilder{
 }
 
 impl FFIBuilder {
-	pub fn new() -> Self { Self::default() }
+	pub fn new(reset:bool) -> Self {
+		if reset {
+			TYPE_STRATEGY.lock().unwrap().clear();
+		}
+		Self::default()
+	}
 
 	fn dtor_code(tp: &str) -> String {
 		let tp = map_to_cxx(tp);
@@ -361,8 +366,14 @@ extern "C" {
 }
 
 #[proc_macro_attribute]
-pub fn bridge(_args: TS0, input: TS0) -> TS0 {
-	let mut bb = FFIBuilder::new();
+pub fn bridge(args: TS0, input: TS0) -> TS0 {
+	let mut flags = HashSet::new();
+	for tt in args.into_iter() {
+		if let TokenTree::Ident(val) = tt {
+			flags.insert(val.to_string());
+		}
+	}
+	let mut bb = FFIBuilder::new(! flags.contains("goon") );
 	match bb.build_bridge_code(input.into()) {
 		Ok(code) => code.into(),
 		Err(e) => syn::Error::new(Span::call_site(), e).to_compile_error().into()
