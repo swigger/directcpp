@@ -1,6 +1,6 @@
 [package]
 name = "test_directcpp"
-version = "0.1.10"
+version = "0.1.11"
 description = "test project for directcpp"
 edition = "2021"
 license = "MIT OR Apache-2.0"

@@ -59,7 +59,7 @@ impl FFIBuilder {
 			}
 		};
 		let mut mp = TYPE_STRATEGY.lock().unwrap();
-		let mut tp1 = if let Some(x) = mp.get(tp) {
+		let mut tp1 = if let Some(x) = mp.get(tp_cpp) {
 			if *x >> 16 != tp_strategy {
 				self.err_str = format!("type {tp} strategy conflict");
 				return Err(&self.err_str);
@@ -70,7 +70,7 @@ impl FFIBuilder {
 		};
 
 		if tp_strategy != TYPE_POD {
-			if (tp1 & 1 == 0) && rtwrap != "SharedPtr" {
+			if (tp1 & 1) == 0 && rtwrap != "SharedPtr" {
 				tp1 |= 1;
 				self.extc_code += &Self::dtor_code(tp_cpp);
 			}
@@ -98,7 +98,7 @@ impl DropSP for {tp} {{
 }}\n");
 			}
 		}
-		mp.insert(tp.to_string(), tp1);
+		mp.insert(tp_cpp.to_string(), tp1);
 		Ok(())
 	}
 
