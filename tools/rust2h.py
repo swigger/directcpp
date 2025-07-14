@@ -19,6 +19,7 @@ class MyParser:
         self.con_str = ""
         self.kw_map = dict()
         self.op_map = dict()
+        self.eof_comment = None
         # https://en.wikipedia.org/wiki/Unicode_block
         self.kw_start = 0x2460
         self.kw_end = 0x257f
@@ -164,11 +165,15 @@ class MyParser:
             for regex, rl_meta in self.rules:
                 if m := regex.match(self.con_str):
                     self.current_comment = self._load_comments(pre_tokens, pre_tokens+len(m.group()))
+                    if self.eof_comment is not None and (self.eof_comment in self.current_comment):
+                        return
                     yield rl_meta, self._back2str(pre_tokens, m.group()), self._back2strs(pre_tokens, m, regex.groups)
                     pre_tokens += len(m.group())
                     self.con_str = self.con_str[m.end():]
                     break
             else:
+                if self.eof_comment is not None and any([self.eof_comment in x for x in self.current_comment]):
+                    return
                 ss1 = self._back2str(pre_tokens, self.con_str[0:10])
                 raise RuntimeError(f"no rule matched: {ss1}")
 
@@ -320,6 +325,7 @@ class Rust2H:
         }
         instr = self.inf.read()
         p = MyParser(instr, rules, Rust2H.get_token)
+        p.eof_comment = "__end_of_rust2h_header__"
         ST_INIT, ST_STRUCT, ST_END, ST_ENUM = 0, 1, 2, 3
         state = ST_INIT
         attrs = []
