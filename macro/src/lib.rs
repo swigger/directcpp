@@ -331,7 +331,7 @@ impl DropSP for {tp} {{
 			},
 			// _ => return Err("xx")
 		};
-		self.norm_code += &format!("{fnstart} {{\n\t{norm_code}\n}}\n");
+		self.norm_code += &format!("#[inline(never)]\n{fnstart} {{\n\t{norm_code}\n}}\n");
 		Ok(())
 	}
 
