@@ -1,5 +1,5 @@
 #pragma once
-#include "rust_spt.h"
+#include "rust-spt.h"
 
 template <class T, size_t bitpos, uint8_t flipped, size_t objpos>
 class RustOptionBase
