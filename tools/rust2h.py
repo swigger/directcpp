@@ -390,7 +390,7 @@ class Rust2H:
         if "RustOption" in content:
             header += """#include "rust/rust-common.h"\n"""
         else:
-            header += """#include "rust/rust_spt.h"\n"""
+            header += """#include "rust/rust-spt.h"\n"""
         content = header + "\n" + content
         self.outf.close()
         self.inf.close()
