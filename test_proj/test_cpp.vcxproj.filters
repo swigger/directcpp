@@ -10,9 +10,4 @@
       <Filter>cpp</Filter>
     </ClCompile>
   </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="cpp\rust_spt.h">
-      <Filter>cpp</Filter>
-    </ClInclude>
-  </ItemGroup>
 </Project>

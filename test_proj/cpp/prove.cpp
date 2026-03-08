@@ -8,7 +8,7 @@
 #include <memory>
 #include <thread>
 #include <chrono>
-#include "rust_spt.h"
+#include "rust/rust-spt.h"
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>

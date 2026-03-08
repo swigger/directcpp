@@ -15,7 +15,6 @@ import bisect
 
 class MyParser:
     def __init__(self, instr, rules, token_func):
-        self.instr = instr
         self.con_str = ""
         self.kw_map = dict()
         self.op_map = dict()
@@ -25,15 +24,24 @@ class MyParser:
         self.kw_end = 0x257f
         self.op_start = 0x2200
         self.op_end = 0x22ff
-        self.rules = []
         self.op_map[';'] = ';'
         self.tokens = []
         self.comments = []
         self.current_comment = []
+        self.instr = instr
+        self.token_func = token_func
+        # load rules.
+        self.translated_rules = []
+        for rl_meta, rl in rules.items():
+            assert isinstance(rl, str)
+            self._parse_rule(rl, rl_meta)
+
+    def _run(self):
         beg1 = 0
         last_token = None
+        instr = self.instr
         while True:
-            name, ss, len1 = token_func(instr)
+            name, ss, len1 = self.token_func(instr)
             if name == "EOF":
                 break
             if name in ['SPACE', "NEWLINE"]:
@@ -44,6 +52,8 @@ class MyParser:
                 continue
             if name in {"COMMENT", "COMMENT1", "COMMENT2", "COMMENT3"}:
                 self.comments.append([last_token if last_token is not None else len(self.tokens), ss])
+                if self.eof_comment and self.eof_comment in ss:
+                    break
                 beg1 += len1
                 instr = instr[len1:]
                 continue
@@ -67,10 +77,6 @@ class MyParser:
             self.tokens.append((name, ss, beg1, len1))
             beg1 += len1
             instr = instr[len1:]
-        # load rules.
-        for rl_meta, rl in rules.items():
-            assert isinstance(rl, str)
-            self._parse_rule(rl, rl_meta)
         self.all_keywords = "".join(self.kw_map.values())
         self.all_operators = "".join(self.op_map.values())
 
@@ -109,7 +115,7 @@ class MyParser:
                 rl = rl[m.end():]
             else:
                 raise RuntimeError(f"unknown token: {rl}")
-        self.rules.append((re.compile(regex), rl_meta))
+        self.translated_rules.append((re.compile(regex), rl_meta))
 
     def _char4kw(self, ss):
         if ss in self.kw_map:
@@ -160,9 +166,10 @@ class MyParser:
         return [x[1] for x in self.comments[s1:e1]]
 
     def parse(self):
+        self._run()
         pre_tokens = 0
         while self.con_str:
-            for regex, rl_meta in self.rules:
+            for regex, rl_meta in self.translated_rules:
                 if m := regex.match(self.con_str):
                     self.current_comment = self._load_comments(pre_tokens, pre_tokens+len(m.group()))
                     if self.eof_comment is not None and (self.eof_comment in self.current_comment):
