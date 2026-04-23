@@ -131,7 +131,7 @@ fn is_iden(ch: char, lead: bool) -> bool {
     false
 }
 
-fn tokenize(ts0: &str) -> Option<Vec<CMToken>> {
+fn tokenize(ts0: &str) -> Option<Vec<CMToken<'_>>> {
     let mut ret = Vec::new();
     let mut ts = ts0;
     while ! ts.is_empty() {

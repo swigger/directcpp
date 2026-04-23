@@ -171,16 +171,19 @@ impl<T> FutureValue<T> where T: Clone {
 	pub fn set_value(addr: usize, value: &T) {
 		let con_addr = addr;
 		let p1 = unsafe { &*(&con_addr as *const usize as *mut Self) };
-		let mut lock = p1.value.value.lock().unwrap();
-		lock.0 = Some(value.clone());
-		let value_clone = p1.value.clone();
-		unsafe {
-			let au = addr as *mut AtomicUsize;
-			(*au).fetch_sub(1, Ordering::Relaxed);
-		}
-		if let Some(w) = lock.1.as_ref() {
-			w.wake_by_ref();
-		}
+		let value_clone = {
+			let mut lock = p1.value.value.lock().unwrap();
+			lock.0 = Some(value.clone());
+			let value_clone = p1.value.clone();
+			unsafe {
+				let au = addr as *mut AtomicUsize;
+				(*au).fetch_sub(1, Ordering::Relaxed);
+			}
+			if let Some(w) = lock.1.as_ref() {
+				w.wake_by_ref();
+			}
+			value_clone
+		};
 		drop(value_clone);
 	}
 }

@@ -4,6 +4,7 @@ use cc;
 fn main() {
 	let projname = "test_cpp";
     println!("cargo:rerun-if-changed=cpp/prove.cpp");
+	let res_path = std::env::var("DEP_DIRECTCPP_RES_MPATH").unwrap();
     let from_vs = env::var("VisualStudioDir").map(|x| !x.is_empty()).unwrap_or(false);
     let is_debug = env::var("PROFILE").map(|x| x == "debug").unwrap_or(false);
     if from_vs {
@@ -17,6 +18,7 @@ fn main() {
     } else {
         let mut cxxb = cc::Build::new();
 		cxxb.cpp(true).std("c++20");
+		cxxb.includes(&[res_path]);
         if cfg!(target_os = "windows") {
             env::set_var("VSLANG", "1033");
             cxxb.flag("/EHsc").flag("/utf-8")
