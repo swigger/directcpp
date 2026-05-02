@@ -245,6 +245,7 @@ impl MSVCMangler {
 pub struct GccMangler {
 	sout: String,
 	is64: bool,
+	macos: bool,
 	subs: HashMap<String, usize>,
 	subs_cnt: usize,
 }
@@ -254,6 +255,7 @@ impl GccMangler{
 		Self {
 			sout:String::new(),
 			is64: cfg!(target_pointer_width = "64"),
+			macos: cfg!(target_os = "macos"),
 			subs: HashMap::new(),
 			subs_cnt: 0,
 		}
@@ -332,11 +334,11 @@ impl GccMangler{
 			match tp {
 				"i32"|"int" => outs.push('i'),
 				"u32"|"uint32_t" => outs.push('j'),
-				"i64"|"int64_t" => outs.push(select_val(self.is64,'l', 'x')),
-				"u64"|"uint64_t" => outs.push(select_val(self.is64,'m', 'y')),
+				"i64"|"int64_t" => outs.push(select_val(self.is64 && !self.macos, 'l', 'x')),
+				"u64"|"uint64_t" => outs.push(select_val(self.is64 && !self.macos, 'm', 'y')),
 				"bool" => outs.push('b'),
 				"char" => outs.push('c'),
-				"size_t" => outs.push(select_val(self.is64,'m', 'j')),
+				"size_t" => outs.push(select_val(self.is64, 'm', 'j')),
 				"i8"|"int8_t" => outs.push('a'),
 				"u8"|"uint8_t" => outs.push('h'),
 				"i16"|"int16_t" => outs.push('s'),
