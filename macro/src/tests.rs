@@ -1,6 +1,18 @@
 #![cfg(test)]
-use quote::quote;
-use super::*;
+
+use proc_macro2::TokenStream;
+use crate::buildcode::FFIBuilder;
+use crate::mangle::{SimpArg, SimpFunc};
+use crate::util::select_val;
+
+macro_rules! win_posix {
+    ($win:expr, $posix:expr) => {{
+        #[cfg(windows)]
+        { $win }
+        #[cfg(not(windows))]
+        { $posix }
+    }};
+}
 
 fn to_string(ts: TokenStream) -> String {
 	let ins = ts.to_string();
@@ -64,7 +76,7 @@ fn test_retvec() {
 			pub fn init_asset_config(url: &CStr, olddata: &[u8]) -> Vec<u8>;
 		}
 	};
-	let mut bb = FFIBuilder::new();
+	let mut bb = FFIBuilder::new(true);
 	let os = to_string(bb.build_bridge_code(input).unwrap());
 	println!("{}", os);
 
@@ -79,6 +91,14 @@ fn test_retvec() {
 	assert_eq!(s.as_str(), "_ZN3ffi8man_dtorI7RustVecIhEEEvPv");
 }
 
+fn build_ts(input: TokenStream) -> Result<String, String> {
+	let mut bb = FFIBuilder::new(true);
+	match bb.build_bridge_code(input) {
+		Ok(s) => Ok(to_string(s)),
+		Err(e) => Err(e.to_string()),
+	}
+}
+
 #[test]
 fn test_cstr() {
 	let input = quote::quote! {
@@ -87,17 +107,18 @@ fn test_cstr() {
 			pub fn cpp_ptr(foo:&CStr, bar:&str, baz:&[u8]) -> i32;
 		}
 	};
-	let mut bb = FFIBuilder::new();
+	let name = win_posix!("?cpp_ptr@ns_bar@ns_foo@@YAHPEBD0_KPEBE1@Z", "_ZN6ns_foo6ns_bar7cpp_ptrEPKcS0_mPKhm");
 	let expect = quote::quote! {
 		extern "C" {
-			#[link_name="?cpp_ptr@ns_bar@ns_foo@@YAHPEBD0_KPEBE1@Z"]
+			#[link_name=#name]
 			fn ffi__cpp_ptr(foo:*const i8,bar:*const u8,bar_len:usize,baz:*const u8,baz_len:usize)->i32;
 		}
+		#[inline(never)]
 		pub fn cpp_ptr(foo:&CStr,bar:&str,baz:&[u8])->i32 {
 			unsafe { ffi__cpp_ptr(foo.as_ptr(),bar.as_ptr(),bar.len(),baz.as_ptr(),baz.len()) }
 		}
 	};
-	assert_eq!(to_string(bb.build_bridge_code(input).unwrap()), to_string(expect));
+	assert_eq!(build_ts(input).unwrap(), to_string(expect));
 }
 
 #[test]
@@ -107,24 +128,24 @@ fn test_async() {
 			pub async fn future_int() -> i32;
 		}
 	};
-	let mut bb = FFIBuilder::new();
-	let r1 = bb.build_bridge_code(input_ts);
-	assert!(r1.is_ok());
-	let r1s = to_string(r1.unwrap());
+	let name = win_posix!("?future_int@@YAXPEAU?$ValuePromise@H@@@Z", "_Z10future_intP12ValuePromiseIiE");
 	// cpp type: void future_int(ValuePromise<int>* ret, ...);
 	let expect = quote::quote! {
 		extern "C"{
-			#[link_name="?future_int@@YAXPEAU?$ValuePromise@H@@@Z"]
+			#[link_name=#name]
 			fn ffi__future_int(addr: usize);
 		}
+		#[inline(never)]
 		pub async fn future_int() -> i32 {
-			let mut arr : [usize;2] = [0, 0];
-			let mut fv = std::pin::pin!(FutureValue::<i32>::default());
-			let dyn_fv_addr = fv.copy_vtbl(&mut arr);
-			unsafe { ffi__future_int(dyn_fv_addr); }
+			let mut fv=FutureValue::<i32>::default();
+			unsafe {
+				let dyn_fv_addr=fv.to_ptr();
+				ffi__future_int(dyn_fv_addr);
+			}
 			fv.await
 		}
 	};
+	let r1s = build_ts(input_ts).unwrap();
 	println!("{}", r1s);
 	assert_eq!(r1s, to_string(expect));
 }
@@ -136,18 +157,13 @@ fn test_pod() {
 			pub fn get_logger() -> POD<DynLogger>;
 		}
 	};
-	let mut bb = FFIBuilder::new();
-	let r1 = bb.build_bridge_code(input_ts);
-	if let Err(es) = r1 {
-		println!("{}", es);
-	}
-	assert!(r1.is_ok());
-	let r1s = to_string(r1.unwrap());
+	#[cfg(windows)]
 	let expected = quote::quote! {
 		extern "C"{
 			#[link_name="?get_logger@@YA?AUDynLogger@@XZ"]
 			fn ffi__get_logger(__rto:*mut usize);
 		}
+		#[inline(never)]
 		pub fn get_logger()->DynLogger{
 			const SZ:usize=(std::mem::size_of::<DynLogger>()+16)/8;
 			let mut __rta:[usize;SZ]=[0;SZ];
@@ -158,7 +174,27 @@ fn test_pod() {
 			}
 		}
 	};
-	assert_eq!(r1s, to_string(expected));
+	#[cfg(not(windows))]
+	let expected = quote::quote! {
+		use std::arch::asm;
+		extern "C"{
+			#[link_name="_Z10get_loggerv"]
+			fn ffi__get_logger();
+		}
+		#[inline(never)]
+		pub fn get_logger()->DynLogger{
+			const SZ:usize=(std::mem::size_of::<DynLogger>()+16)/8;
+			let mut __rta:[usize;SZ]=[0;SZ];
+			unsafe{
+				let __rtox8=&mut __rta as*mut usize;
+				asm!("mov x8, {xval1}",xval1=in(reg)__rtox8);
+				ffi__get_logger();
+				let __rto=(*(&__rta as*const usize as*const DynLogger)).clone();
+				__rto
+			}
+		}
+	};
+	assert_eq!(build_ts(input_ts).unwrap(), to_string(expected));
 }
 
 #[test]
@@ -168,7 +204,8 @@ fn it_works() {
 			pub fn cpp_ptr(xx:i32) -> SharedPtr<CppStruct>;
 		}
 	);
-	let resp = quote! {
+	#[cfg(windows)]
+	let exptected = quote! {
 		extern "C" {
 			#[link_name = "?cpp_ptr@@YA?AV?$shared_ptr@VCppStruct@@@std@@H@Z"]
 			fn ffi__cpp_ptr (__rto : * mut u8 , xx : i32) ;
@@ -190,18 +227,43 @@ fn it_works() {
 			__rto
 		}
 	};
-
-	let mut bb = FFIBuilder::new();
-	let r1 = bb.build_bridge_code(ts);
-	assert!(r1.is_ok());
-	let r1 = to_string(r1.unwrap());
-	assert_eq!(r1, to_string(resp));
+	#[cfg(not(windows))]
+	let expected = quote::quote! {
+		use std::arch::asm;
+		extern "C"{
+			#[link_name="_Z7cpp_ptri"]
+			fn ffi__cpp_ptr(xx:i32);
+			#[link_name="_ZN3ffi11man_dtor_spI9CppStructEEvPv"]
+			fn ffi__freeSP_CppStruct(__o:*mut usize);
+		}
+		impl DropSP for CppStruct{
+			unsafe fn __drop_sp(ptr:*mut[u8;0]){
+				if ptr as usize != 0 {
+					ffi__freeSP_CppStruct(ptr as*mut usize);
+				}
+			}
+		}
+		#[inline(never)]
+		pub fn cpp_ptr(xx:i32) -> SharedPtr<CppStruct> {
+			let mut __rto=SharedPtr::<CppStruct>::default();
+			unsafe {
+				let __rtox8=&mut __rto as*mut SharedPtr<CppStruct>as*mut u8;
+				ffi__cpp_ptr({
+					let __argk=xx;
+					asm!("mov x8, {xval1}",xval1=in(reg)__rtox8);
+					__argk});
+			}
+			__rto
+		}
+	};
+	assert_eq!(build_ts(ts).unwrap(), to_string(expected));
 
 	let ts = quote::quote!(
 		extern "C++" {
 			pub fn on_magic(magic: &mut MagicIn, cs: CPtr<CppStruct>) -> MagicOut;
 		}
 	);
+	#[cfg(windows)]
 	let expect = quote::quote! {
 		extern "C" {
 			#[link_name="?on_magic@@YA?AUMagicOut@@AEAUMagicIn@@PEAVCppStruct@@@Z"]
@@ -220,7 +282,33 @@ fn it_works() {
 			}
 		}
 	};
-	assert_eq!(to_string( bb.build_bridge_code(ts).unwrap()   ), to_string(expect));
+	#[cfg(not(windows))]
+	let expect = quote::quote! {
+		use std::arch::asm;
+		extern "C"{
+			#[link_name="_Z8on_magicR7MagicInP9CppStruct"]
+			fn ffi__on_magic(magic:*mut MagicIn,cs:*const u8);
+			#[link_name="_ZN3ffi8man_dtorI8MagicOutEEvPv"]
+			fn ffi__free_MagicOut(__o:*mut usize);
+		}
+		#[inline(never)]
+		pub fn on_magic(magic:&mut MagicIn,cs:CPtr<CppStruct>) -> MagicOut {
+			const SZ:usize=(std::mem::size_of::<MagicOut>()+16)/8;
+			let mut __rta:[usize;SZ]=[0;SZ];
+			unsafe {
+				let __rtox8=&mut __rta as*mut usize;
+				ffi__on_magic(magic as*mut MagicIn, {
+					let __argk=cs.addr as*const u8;
+					asm!("mov x8, {xval1}",xval1=in(reg)__rtox8);
+					__argk
+				});
+				let __rto=(*(&__rta as*const usize as*const MagicOut)).clone();
+				ffi__free_MagicOut(&mut __rta as*mut usize);
+				__rto
+			}
+		}
+	};
+	assert_eq!(build_ts(ts).unwrap(), to_string(expect));
 	let ts = quote::quote!(
 		extern "C++" {
 			#[member_of(CppStruct)]
@@ -233,5 +321,21 @@ fn it_works() {
 			pub fn new_user_order_c(order: &UserOrder, xxx: i32) -> UserOrderResp;
 		}
 	);
-	println!("{}", to_string(bb.build_bridge_code(ts).unwrap()));
+	println!("{}", build_ts(ts).unwrap());
+}
+
+#[test]
+fn test_misc() {
+	let ts = quote::quote!(
+		extern "C++" {
+			pub fn cpp_ptr(xx:&Vec<&str>) -> SharedPtr<CppStruct>;
+			pub fn cxx_rebuild_blob(old: &[u8], ss:&Vec<&str>) -> Vec<u8>;
+		}
+	);
+	match build_ts(ts) {
+		Ok(s) => println!("{}", s),
+		Err(s) => {
+			panic!("\x1b[1;31mERROR\x1b[0m: {}", s);
+		},
+	}
 }
