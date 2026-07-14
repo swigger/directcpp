@@ -59,7 +59,8 @@ void on_start() {
 #ifdef _WIN32
 	SetConsoleCP(CP_UTF8);
 	SetConsoleOutputCP(CP_UTF8);
-
+#endif
+#if defined(_WIN32) && defined(_DEBUG)
 	char cmd[200];
 	snprintf(cmd, sizeof(cmd), "waitpid -T 60 %d", (int)GetCurrentProcessId());
 	PROCESS_INFORMATION pinfo{};
