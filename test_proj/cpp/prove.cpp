@@ -93,6 +93,19 @@ RustVec<uint8_t> get_bin() {
 	return RustVec<uint8_t>(data, sizeof(data));
 }
 
+// Newly-supported: a Rust `&Vec<&str>` reaches C++ as a read-only `const RustVec<rust_refstr_t>&`.
+// `&str` is mapped to the rust_refstr_t fat-pointer struct declared in rust-spt.h.
+// We iterate the vector (owned by Rust) and join the pieces into a RustString.
+RustString join_strings(const RustVec<rust_refstr_t>& parts) {
+	std::cout << "c++ join_strings: received " << parts.size() << " parts" << std::endl;
+	std::string out;
+	for (const auto& p : parts) {
+		if (!out.empty()) out += ", ";
+		out.append(p.data, p.len);
+	}
+	return RustString(out.data(), out.size());
+}
+
 namespace myns {
 	RustString get_message() {
 		return "message from c++";

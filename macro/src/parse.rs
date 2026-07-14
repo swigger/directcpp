@@ -1,5 +1,8 @@
 use proc_macro2::TokenStream;
-use crate::code_match;
+use syn::{
+	Attribute, FnArg, ForeignItem, ItemForeignMod, GenericArgument, Pat, PathArguments,
+	ReturnType, Type, Visibility,
+};
 use crate::util::*;
 use crate::mangle::*;
 
@@ -13,52 +16,72 @@ pub fn map_to_cxx(tp: &str) -> &str {
 pub struct Functions {
 	pub funcs: Vec<SimpFunc>,
 	pub is_cpp: bool,
-	cmo: code_match::CodeMatchObject,
 	err_str: String,
+}
+
+/// Render a `syn::Type` back into a compact type string (no incidental spaces),
+/// e.g. `&mut MagicIn`, `CPtr<CppStruct>`, `&Vec<&str>`, `[u8]`.
+fn type_str(ty: &Type) -> String {
+	match ty {
+		Type::Reference(r) => {
+			format!("&{}{}", if r.mutability.is_some() { "mut " } else { "" }, type_str(&r.elem))
+		}
+		Type::Path(p) => {
+			let seg = match p.path.segments.last() {
+				Some(s) => s,
+				None => return String::new(),
+			};
+			let base = seg.ident.to_string();
+			match &seg.arguments {
+				PathArguments::AngleBracketed(a) => {
+					let inner: Vec<String> = a.args.iter().filter_map(|g| match g {
+						GenericArgument::Type(t) => Some(type_str(t)),
+						_ => None,
+					}).collect();
+					format!("{}<{}>", base, inner.join(","))
+				}
+				_ => base,
+			}
+		}
+		Type::Slice(s) => format!("[{}]", type_str(&s.elem)),
+		Type::Ptr(p) => {
+			format!("*{}{}", if p.mutability.is_some() { "mut " } else { "const " }, type_str(&p.elem))
+		}
+		other => quote::quote!(#other).to_string().replace(' ', ""),
+	}
+}
+
+/// The "core" identifier of a type: peel references and take the last path segment.
+fn core_ident(ty: &Type) -> String {
+	match ty {
+		Type::Reference(r) => core_ident(&r.elem),
+		Type::Path(p) => p.path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default(),
+		Type::Slice(_) => type_str(ty),
+		other => type_str(other),
+	}
+}
+
+fn pat_name(pat: &Pat) -> String {
+	match pat {
+		Pat::Ident(pi) => pi.ident.to_string(),
+		other => quote::quote!(#other).to_string().replace(' ', ""),
+	}
+}
+
+fn path_to_string(path: &syn::Path) -> String {
+	path.segments.iter()
+		.map(|s| s.ident.to_string())
+		.collect::<Vec<_>>()
+		.join("::")
 }
 
 impl Functions {
 	pub fn new() -> Self { Self{
 		funcs: Vec::new(),
 		is_cpp: false,
-		cmo: code_match::CodeMatchObject::new(),
 		err_str: "".to_string(),
 	} }
 
-	fn parse_attr(self: &mut Self, ts: TokenStream, ns:&mut String) -> String {
-		let mut dest = self.cmo.build_string(ts, true);
-		{
-			// Let's search all class hints.
-			let reg = self.cmo.build_regex("`([ class struct `]) ( `(`iden`) )", true).unwrap();
-			let mut vr = Vec::new();
-			let mut dest1 = dest.clone();
-			while code_match::test_match(&mut dest1, &reg, &mut vr) {
-				let klsname = self.cmo.back_str(&vr[1]);
-				let ktype = self.cmo.back_str(&vr[0]);
-				let _ = set_class_hint(&klsname, match ktype.as_str() {
-					"class" => ClassHint::StrongClass,
-					_ => ClassHint::StrongStruct,
-				});
-			}
-		}
-		{
-			let reg = self.cmo.build_regex("namespace ( `(.*?`) )", true).unwrap();
-			let mut vr = Vec::new();
-			let mut dest1 = dest.clone();
-			if code_match::test_match(&mut dest1, &reg, &mut vr) {
-				*ns = self.cmo.back_str(&vr[0]);
-			}
-		}
-
-		let reg = self.cmo.build_regex(" member_of ( `(`iden`) )", true).unwrap();
-		let mut vr = Vec::new();
-		if code_match::test_match(&mut dest, &reg, &mut vr) {
-			let klsname = self.cmo.back_str(&vr[0]);
-			let _ = set_class_hint(&klsname, ClassHint::StrongClass);
-			return klsname;
-		}
-		"".to_string()
-	}
 	fn is_compatible_rettype(x: &str) -> bool {
 		if x.is_empty() { return true; }
 		if x == "i8" || x == "i16" || x == "i32" || x == "i64" { return true; }
@@ -102,6 +125,10 @@ impl Functions {
 			"String" => {
 				arg.is_primitive=false;
 				"RustString"   //special map for String
+			},
+			"str" => {
+				arg.is_primitive=false;
+				"rust_refstr_t"   //&str maps to the rust_refstr_t fat-pointer struct
 			},
 			_ => {arg.is_primitive = false; &arg.tp as &str},
 		};
@@ -152,133 +179,191 @@ impl Functions {
 		Ok(())
 	}
 
-	fn parse_one_func(self: &mut Self, curfunc: &mut SimpFunc, ts: TokenStream) -> Result<(), ()>
-	{
-		let mut dest = self.cmo.build_string(ts, true);
-		let reg0 = [ "`(`iden`) : `( & `)? `( mut `)?  `(`iden`) `(?: , `|$)",
-			"`(`iden`) : &`? CPtr< &`? `(`iden`) >  `(?: , `|$)",
-			"`(`iden`) : Option< & `(`iden`) >  `(?: , `|$)",
-			"`(`iden`) : & `(`iden`) < `(`iden`) >  `(?: , `|$)",
-			"`(`iden`) : & `( [u8] `)  `(?: , `|$)",
-		];
-		let reg = reg0.map(|x| self.cmo.build_regex(x, true).unwrap());
-		let mut vr = Vec::new();
-		let mut arg_idx = 1;
-		loop {
-			let dest_cp = dest.clone();
-			let idx = code_match::test_match2(&mut dest, &reg, &mut vr);
-			if idx < 0 {
-				break;
+	/// Walk a `syn::Type` into the SimpArg IR fields (tp / tp_wrap / tp_full / is_const).
+	/// `name` is "" for return values.
+	fn parse_arg_type(&mut self, name: &str, ty: &Type) -> Result<SimpArg, ()> {
+		let mut arg = SimpArg::default();
+		arg.name = name.to_string();
+		let tp_full = type_str(ty);
+		arg.raw_str = if name.is_empty() { tp_full.clone() } else { format!("{}:{}", name, tp_full) };
+
+		// Peel a single outer reference for inspection.
+		let (is_ref, is_mut, core): (bool, bool, &Type) = match ty {
+			Type::Reference(r) => (true, r.mutability.is_some(), r.elem.as_ref()),
+			other => (false, false, other),
+		};
+
+		match core {
+			Type::Slice(_) => {
+				arg.tp = type_str(core); // e.g. "[u8]"
+				arg.tp_wrap = String::new();
+				arg.is_const = !is_mut;
+				arg.tp_full = tp_full;
 			}
-			let mut cur_arg = SimpArg::default();
-			let raw_len = dest_cp.len() - dest.len();
-			cur_arg.raw_str = self.cmo.back_str(&dest_cp[0..raw_len]);
-			cur_arg.name = self.cmo.back_str(&vr[0]);
-			if idx == 0 {
-				cur_arg.is_const = vr[2].is_empty();
-				cur_arg.tp = self.cmo.back_str(&vr[3]);
-				cur_arg.tp_full = if vr[1].is_empty() { "".to_string() } else { "&".to_string() };
-				if ! cur_arg.is_const {
-					cur_arg.tp_full += "mut ";
+			Type::Path(p) => {
+				let seg = match p.path.segments.last() {
+					Some(s) => s,
+					None => { self.err_str = "empty type path".to_string(); return Err(()); }
+				};
+				let outer = seg.ident.to_string();
+				match &seg.arguments {
+					PathArguments::AngleBracketed(a) => {
+						let inner_ident = a.args.iter().find_map(|g| match g {
+							GenericArgument::Type(t) => Some(core_ident(t)),
+							_ => None,
+						}).unwrap_or_default();
+						match outer.as_str() {
+							"CPtr" => {
+								arg.tp = inner_ident;
+								arg.tp_wrap = "CPtr".to_string();
+								arg.is_const = false;
+								arg.tp_full = format!("CPtr<{}>", &arg.tp);
+							}
+							"Option" => {
+								arg.tp = inner_ident;
+								arg.tp_wrap = "Option".to_string();
+								arg.is_const = false;
+								arg.tp_full = format!("Option<&{}>", &arg.tp);
+							}
+							_ => {
+								// Vec / SharedPtr / UniquePtr / POD / other wrappers.
+								arg.tp = inner_ident;
+								arg.tp_wrap = outer;
+								arg.is_const = if is_ref { !is_mut } else { false };
+								arg.tp_full = tp_full;
+							}
+						}
+					}
+					_ => {
+						// Plain type (possibly behind a reference).
+						arg.tp = outer;
+						arg.tp_wrap = String::new();
+						arg.is_const = if is_ref { !is_mut } else { true };
+						arg.tp_full = tp_full;
+					}
 				}
-				cur_arg.tp_full += &cur_arg.tp;
-			} else if idx == 2 {
-				cur_arg.tp = self.cmo.back_str(&vr[2]);
-				cur_arg.tp_wrap = "Option".to_string();
-				cur_arg.tp_full = format!("Option<&{}>", &cur_arg.tp);
-			} else if idx == 3 {
-				cur_arg.is_const = true;
-				cur_arg.tp = self.cmo.back_str(&vr[2]);
-				cur_arg.tp_wrap = self.cmo.back_str(&vr[1]);
-				cur_arg.tp_full = format!("&{}<{}>", &cur_arg.tp_wrap, &cur_arg.tp);
-			} else if idx == 1 {
-				cur_arg.tp = self.cmo.back_str(&vr[1]);
-				cur_arg.tp_wrap = "CPtr".to_string();
-				cur_arg.tp_full = format!("CPtr<{}>", &cur_arg.tp);
-			} else if idx == 4 {
-				cur_arg.tp = self.cmo.back_str(&vr[1]);
-				cur_arg.is_const = true;
-				cur_arg.tp_full = "&[u8]".to_string();
-			} else {
-				self.err_str = format!("argument {} not supported", arg_idx);
-				return Err(());
 			}
-			self.build_as_c_arg(&mut cur_arg)?;
-			curfunc.arg_list.push(cur_arg);
-			arg_idx += 1;
+			_ => {
+				arg.tp = type_str(core);
+				arg.tp_wrap = String::new();
+				arg.is_const = if is_ref { !is_mut } else { true };
+				arg.tp_full = tp_full;
+			}
 		}
-		if ! dest.is_empty() {
-			self.err_str = format!("argument {arg_idx} not supported");
-			return Err(());
+		Ok(arg)
+	}
+
+	fn parse_attr(&mut self, attr: &Attribute, ns: &mut String, curfunc: &mut SimpFunc) {
+		let name = match attr.path().segments.last() {
+			Some(s) => s.ident.to_string(),
+			None => return,
+		};
+		match name.as_str() {
+			"namespace" => {
+				if let Ok(path) = attr.parse_args::<syn::Path>() {
+					*ns = path_to_string(&path);
+				}
+			}
+			"member_of" => {
+				if let Ok(path) = attr.parse_args::<syn::Path>() {
+					let klsname = path_to_string(&path);
+					let _ = set_class_hint(&klsname, ClassHint::StrongClass);
+					curfunc.klsname = klsname;
+				}
+			}
+			"class" => {
+				if let Ok(path) = attr.parse_args::<syn::Path>() {
+					let _ = set_class_hint(&path_to_string(&path), ClassHint::StrongClass);
+				}
+			}
+			"struct" => {
+				if let Ok(path) = attr.parse_args::<syn::Path>() {
+					let _ = set_class_hint(&path_to_string(&path), ClassHint::StrongStruct);
+				}
+			}
+			_ => {}
 		}
+	}
+
+	fn parse_ret(&mut self, output: &ReturnType) -> Result<SimpArg, ()> {
+		let mut ret = match output {
+			ReturnType::Default => SimpArg::default(),
+			ReturnType::Type(_, ty) => self.parse_arg_type("", ty)?,
+		};
+		ret.is_primitive = ret.tp_wrap.is_empty() && Self::is_compatible_rettype(&ret.tp);
+		self.build_as_c_arg(&mut ret)?;
+		Ok(ret)
+	}
+
+	fn parse_fn(&mut self, f: &syn::ForeignItemFn) -> Result<(), ()> {
+		let mut curfunc = SimpFunc::default();
+		curfunc.access = match &f.vis {
+			Visibility::Public(_) => "pub".to_string(),
+			Visibility::Restricted(r) => format!("pub({})", path_to_string(&r.path)),
+			Visibility::Inherited => String::new(),
+		};
+		curfunc.is_async = f.sig.asyncness.is_some();
+		curfunc.fn_name = f.sig.ident.to_string();
+
+		let mut ns = String::new();
+		for attr in &f.attrs {
+			self.parse_attr(attr, &mut ns, &mut curfunc);
+		}
+		if !ns.is_empty() {
+			if curfunc.klsname.is_empty() {
+				curfunc.fn_name = format!("{}::{}", ns, curfunc.fn_name);
+			} else {
+				curfunc.klsname = format!("{}::{}", ns, curfunc.klsname);
+			}
+		}
+
+		curfunc.ret = self.parse_ret(&f.sig.output)?;
+
+		for input in &f.sig.inputs {
+			match input {
+				FnArg::Typed(pt) => {
+					let name = pat_name(&pt.pat);
+					let mut arg = self.parse_arg_type(&name, &pt.ty)?;
+					if let Err(_) = self.build_as_c_arg(&mut arg) {
+						let x = move_obj(&mut self.err_str);
+						self.err_str = format!("function {} error: {x}", curfunc.fn_name);
+						return Err(());
+					}
+					curfunc.arg_list.push(arg);
+				}
+				FnArg::Receiver(_) => {
+					self.err_str = format!("function {}: `self` receiver is not supported", curfunc.fn_name);
+					return Err(());
+				}
+			}
+		}
+
+		self.funcs.push(curfunc);
 		Ok(())
 	}
 
 	pub fn parse_ts(self: &mut Self, input: TokenStream) -> Result<(), &str> {
-		let mut dest = self.cmo.build_string(input, false);
-		let reg0 = self.cmo.build_regex(" extern `([ \"C\" \"C++\" `]) {} `(\\d+) ", false).unwrap();
-		let mut vr = Vec::new();
-		if ! code_match::test_match(&mut dest, &reg0, &mut vr) {
-			return Err("macro expect extern \"C\" {...}");
-		}
-		self.is_cpp = self.cmo.find_lit(vr[0].chars().nth(0).unwrap_or('\0'))
-			.map(|x| x == "\"C++\"").unwrap_or(false);
-		let ts1 = self.cmo.find_ts(&vr[1]).unwrap();
-		let mut dest = self.cmo.build_string(ts1, false);
-		let reg1 = self.cmo.build_regex("
-		`(?:  #[] `(\\d+) `)?
-		`( pub `| pub(crate) `\\d+)? `( async `)?
-		fn   `(`iden`)   ()`(\\d+)
-		`(?: -> `(?: `iden :: `)* `(`iden`| `iden < `iden > `) `)? ;", false).unwrap();
+		let fm: ItemForeignMod = match syn::parse2(input) {
+			Ok(x) => x,
+			Err(e) => {
+				self.err_str = format!("macro expect extern \"C\"/\"C++\" {{...}}: {}", e);
+				return Err(&self.err_str);
+			}
+		};
+		self.is_cpp = fm.abi.name.as_ref().map(|n| n.value() == "C++").unwrap_or(false);
 
-		let mut func_idx = 1;
-		vr.clear();
-		while code_match::test_match(&mut dest, &reg1, &mut vr) {
-			let mut curfunc = SimpFunc::default();
-			curfunc.access = self.cmo.back_str(&vr[1]);
-			curfunc.is_async = !vr[2].is_empty();
-			curfunc.fn_name = self.cmo.back_str(&vr[3]);
-			if let Some(ts) = self.cmo.find_ts(&vr[0]) {
-				let mut ns = String::new();
-				curfunc.klsname = self.parse_attr(ts, &mut ns);
-				if ns.len() > 0 {
-					if curfunc.klsname.len() == 0 {
-						curfunc.fn_name = format!("{}::{}", ns, curfunc.fn_name);
-					} else {
-						curfunc.klsname = format!("{}::{}", ns, curfunc.klsname);
+		for item in &fm.items {
+			match item {
+				ForeignItem::Fn(f) => {
+					if let Err(_) = self.parse_fn(f) {
+						return Err(&self.err_str);
 					}
 				}
+				_ => {
+					self.err_str = "only function declarations are supported inside the bridge block".to_string();
+					return Err(&self.err_str);
+				}
 			}
-			let ts2 = self.cmo.find_ts(&vr[4]).unwrap();
-			let ret_vec = vr[5].chars().collect::<Vec<char>>();
-			curfunc.ret.raw_str = self.cmo.back_str2(ret_vec.iter());
-			curfunc.ret.tp_full = curfunc.ret.raw_str.clone();
-			if ret_vec.len() == 1 {
-				curfunc.ret.tp = self.cmo.find_iden(ret_vec[0]).map(|x| x.to_string()).unwrap_or("".to_string());
-			} else if ret_vec.len() == 4 {
-				curfunc.ret.tp = self.cmo.find_iden(ret_vec[2]).map(|x| x.to_string()).unwrap_or("".to_string());
-				curfunc.ret.tp_wrap = self.cmo.find_iden(ret_vec[0]).map(|x| x.to_string()).unwrap_or("".to_string());
-			}
-			curfunc.ret.is_primitive = curfunc.ret.tp_wrap.is_empty() && Self::is_compatible_rettype(&curfunc.ret.tp);
-			if let Err(_) = self.build_as_c_arg(&mut curfunc.ret) {
-				return Err(&self.err_str);
-			}
-			if let Err(_) = self.parse_one_func(&mut curfunc, ts2) {
-				let x = move_obj(&mut self.err_str);
-				self.err_str = format!("function {} error: {x}", curfunc.fn_name);
-				return Err(&self.err_str);
-			}
-			self.funcs.push(curfunc);
-			func_idx += 1;
-		}
-		if ! dest.is_empty() {
-			let mut vv = dest.chars().collect::<Vec<char>>();
-			if vv.len() > 10 {
-				vv.truncate(10);
-			}
-			let olds = self.cmo.back_str2(vv.iter());
-			self.err_str = format!("macro expect pub fn name(ARGLIST) -> ret_type; found mismatch at function {func_idx} near {olds}");
-			return Err(&self.err_str);
 		}
 		Ok(())
 	}

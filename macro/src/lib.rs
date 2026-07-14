@@ -1,4 +1,3 @@
-mod code_match;
 mod mangle;
 mod parse;
 mod util;

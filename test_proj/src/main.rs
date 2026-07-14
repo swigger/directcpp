@@ -43,6 +43,9 @@ extern "C++" {
 
 	pub fn get_bin() -> Vec<u8>;
 
+	// newly-supported: pass a Rust Vec by reference to C++ (received as const RustVec<T>&).
+	pub fn join_strings(parts: &Vec<&str>) -> String;
+
 	pub async fn slow_tostr(val: i32) -> String;
 
 	// for complex objects that can only be handled at rust side,
@@ -116,6 +119,12 @@ fn main()
 	let bin = get_bin();
 	let bin = bin.iter().map(|x| format!("{:02x}", x)).collect::<Vec<String>>().join("");
 	println!("Rust: got bin: {}", bin);
+
+	// newly-supported call: pass a &Vec<&str> to C++.
+	let parts = vec!["alpha", "beta", "gamma"];
+	let joined = join_strings(&parts);
+	println!("Rust: join_strings result = \"{}\"", joined);
+	assert_eq!(joined, "alpha, beta, gamma");
 
 	let mut msgin = MagicIn{
 		ivalue: 42,

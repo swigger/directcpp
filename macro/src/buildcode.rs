@@ -215,6 +215,19 @@ impl DropSP for {tp} {{
                     }
                 },
                 "CPtr" => args_usage.push(format!("{}.addr as * const u8", &arg.name)),
+                "Vec" if is_ref => {
+                    // Pass a &Vec<T> to C++ by address; the C++ side receives it as
+                    // `const RustVec<T>&` (a reference == pointer), matching the layout
+                    // used by Vec return values.
+                    args_x_done = true;
+                    let pointee = arg.tp_full
+                        .trim_start_matches('&')
+                        .trim_start_matches("mut ")
+                        .to_string();
+                    args_c.push(format!("{}: *const {}", &arg.name, &pointee));
+                    args_r.push(format!("{}: {}", &arg.name, &arg.tp_full));
+                    args_usage.push(format!("{} as *const {}", &arg.name, &pointee));
+                },
                 "Option" => match is_ref {
                     true => args_usage.push(format!("{}.as_ref().map_or(0 as * const {}, |x| x as * const {})", &arg.name, &arg.tp, &arg.tp)),
                     false => args_usage.push(format!("{}.map_or(0 as * const {}, |x| x as * const {})", &arg.name, &arg.tp, &arg.tp)),
